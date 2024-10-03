@@ -2,7 +2,7 @@ require_relative "lib/glue_gun/version"
 
 Gem::Specification.new do |spec|
   spec.name          = "glue_gun_dsl"
-  spec.version       = "0.1.0"
+  spec.version       = GlueGun::VERSION
   spec.authors       = ["Brett Shollenberger"]
   spec.email         = ["brett.shollenberger@gmail.com"]
 
