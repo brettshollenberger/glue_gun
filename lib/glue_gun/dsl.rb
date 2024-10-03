@@ -166,20 +166,29 @@ module GlueGun
 
     def build_dependency_attributes(option_config, dep_attributes)
       option_config.attributes.each do |attr_name, attr_config|
-        next if dep_attributes.key?(attr_name)
+        # If the attribute is already provided, use it
+        if dep_attributes.key?(attr_name)
+          value = dep_attributes[attr_name]
+        else
+          value = if attr_config.source && respond_to?(attr_config.source)
+                    send(attr_config.source)
+                  elsif respond_to?(attr_name)
+                    send(attr_name)
+                  else
+                    attr_config.default
+                  end
 
-        value = if attr_config.source && respond_to?(attr_config.source)
-                  send(attr_config.source)
-                elsif respond_to?(attr_name)
-                  send(attr_name)
-                else
-                  attr_config.default
-                end
+          value = attr_config.process_value(value, self) if attr_config.respond_to?(:process_value)
 
-        value = attr_config.process_value(value, self) if attr_config.respond_to?(:process_value)
+          dep_attributes[attr_name] = value
+        end
 
-        dep_attributes[attr_name] = value
+        # After getting the value, check if it's required and nil
+        if value.nil? && attr_config.required
+          raise ArgumentError, "Missing required attribute '#{attr_name}' for #{option_config.class_name}"
+        end
       end
+
       dep_attributes
     end
 
@@ -209,7 +218,6 @@ module GlueGun
           unless default_option.attributes.keys.include?(init_args.keys.first)
             raise ArgumentError, "#{default_option.class_name} does not respond to #{init_args.keys.first}"
           end
-
         end
       end
 
@@ -255,11 +263,12 @@ module GlueGun
     end
 
     class ConfigAttr
-      attr_reader :name, :default, :source, :block
+      attr_reader :name, :default, :required, :source, :block
 
-      def initialize(name, default: nil, source: nil, &block)
+      def initialize(name, default: nil, required: false, source: nil, &block)
         @name = name.to_sym
         @default = default
+        @required = required
         @source = source
         @block = block
       end
@@ -289,14 +298,14 @@ module GlueGun
         @is_only = false
       end
 
-      # Support set_class and define_attr for single-option dependencies
+      # Support set_class and attribute for single-option dependencies
       def set_class(class_name)
         single_option.set_class(class_name)
         set_default_option_name(:default)
       end
 
-      def attribute(name, default: nil, source: nil, &block)
-        single_option.attribute(name, default: default, source: source, &block)
+      def attribute(name, default: nil, required: false, source: nil, &block)
+        single_option.attribute(name, default: default, required: required, source: source, &block)
       end
 
       def get_option(name)
@@ -363,8 +372,8 @@ module GlueGun
         end
       end
 
-      def attribute(name, default: nil, source: nil, &block)
-        attr = ConfigAttr.new(name, default: default, source: source, &block)
+      def attribute(name, default: nil, required: false, source: nil, &block)
+        attr = ConfigAttr.new(name, default: default, required: required, source: source, &block)
         @attributes[name.to_sym] = attr
       end
 

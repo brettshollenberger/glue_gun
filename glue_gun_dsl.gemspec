@@ -18,6 +18,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "activesupport", ">= 5.2", "< 8"
 
   # Optional: Add development dependencies
+  spec.add_development_dependency "guard"
   spec.add_development_dependency "ostruct"
   spec.add_development_dependency "polars-df"
   spec.add_development_dependency "pry"

@@ -94,7 +94,7 @@ RSpec.describe GlueGun::DSL do
       dependency.option :s3 do |option|
         option.set_class Test::Data::Datasource::S3Datasource
         option.attribute :root_dir
-        option.attribute :s3_bucket
+        option.attribute :s3_bucket, required: true, default: "default-bucket"
       end
 
       dependency.option :directory do |option|
@@ -124,7 +124,7 @@ RSpec.describe GlueGun::DSL do
   let(:s3_attrs) do
     {
       s3: {
-        s3_bucket: "fundera",
+        s3_bucket: "my-bucket",
         s3_access_key_id: "12345",
         s3_secret_access_key: "67890"
       }
@@ -135,10 +135,9 @@ RSpec.describe GlueGun::DSL do
   let(:child_class) { ChildClass }
 
   describe "Attributes" do
-    it "defines an attribute with a default value" do
-      instance = test_class.new(age: 30, datasource: s3_attrs)
-      expect(instance.id).to eq("Default Name")
-      expect(instance.preprocessing_steps).to eq({})
+    it "defines an attribute with a default on dependencies" do
+      instance = test_class.new(age: 30, datasource: { s3: { s3_access_key_id: "123", s3_secret_access_key: "456" } })
+      expect(instance.datasource.s3_bucket).to eq "default-bucket"
     end
 
     it "defines picklist" do
@@ -288,7 +287,7 @@ RSpec.describe GlueGun::DSL do
     it "creates a dependency with multiple options" do
       instance = test_class.new(age: 30, datasource: s3_attrs)
       expect(instance.datasource).to be_a(Test::Data::Datasource::S3Datasource)
-      expect(instance.datasource.synced_directory.s3_bucket).to eq("fundera")
+      expect(instance.datasource.synced_directory.s3_bucket).to eq("my-bucket")
     end
 
     it "uses the when block with a string input for local" do
@@ -305,7 +304,7 @@ RSpec.describe GlueGun::DSL do
     it "raises an error when a required attribute for a dependency is not provided" do
       expect do
         test_class.new(age: 30, datasource: { s3: { s3_bucket: nil } })
-      end.to raise_error(ActiveModel::ValidationError, /S3 bucket can't be blank/)
+      end.to raise_error(ArgumentError, /Missing required attribute 's3_bucket'/)
     end
 
     it "uses the when block to determine the correct option when using when block" do
