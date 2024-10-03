@@ -8,7 +8,7 @@ Gem::Specification.new do |spec|
 
   spec.summary       = "GlueGun extends ActiveModel for dependency management"
   spec.description   = "GlueGun makes dependency injection and hydration a first-order concern"
-  spec.homepage      = "https://github.com/brettshollenberger/glue_gun_dsl"
+  spec.homepage      = "https://github.com/brettshollenberger/glue_gun"
   spec.license       = "MIT"
 
   spec.files         = Dir["lib/**/*.rb"]
