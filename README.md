@@ -67,7 +67,7 @@ GlueGun::DSL extends `ActiveModel` by making dependency injection a first-class 
 To use GlueGun::DSL in your class, include it after requiring the gem:
 
 ```ruby
-require 'glue_gun_dsl'
+require 'glue_gun'
 
 class MyClass
   include GlueGun::DSL
@@ -240,7 +240,7 @@ end
 Below is an example of building a complex data pipeline using GlueGun::DSL, showcasing how to define attributes, dependencies, and dynamic configurations.
 
 ```ruby
-require 'glue_gun_dsl'
+require 'glue_gun'
 
 module DataPipeline
   class Dataset
