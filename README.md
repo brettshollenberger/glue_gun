@@ -25,7 +25,8 @@ class Model
   end
 end
 
-Model.new(database: { postgres: { host: "localhost" } })
+instance = Model.new(database: { postgres: { host: "localhost" } })
+instance.database # is a PostgreSQLDatabase instance with host: localhost, port: 5432
 ```
 
 ---
