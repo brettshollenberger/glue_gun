@@ -3,6 +3,16 @@ require "spec_helper"
 
 PROJECT_ROOT = Pathname.new(File.expand_path("..", __dir__))
 
+require "pathname"
+
+class Pathname
+  def append(folder)
+    dir = cleanpath
+    dir = dir.join(folder) unless basename.to_s == folder
+    dir
+  end
+end
+
 RSpec.describe GlueGun::DSL do
   # Mocking necessary classes for the tests
   class NoOp
@@ -34,12 +44,15 @@ RSpec.describe GlueGun::DSL do
           attribute :root_dir, :string
           attribute :s3_access_key_id, :string
           attribute :s3_secret_access_key, :string
+          attribute :polars_args, :hash, default: {}
 
           validates :s3_bucket, :s3_access_key_id, :s3_secret_access_key, presence: true
 
           dependency :synced_directory do |dep|
             dep.set_class Test::Data::SyncedDir
-            dep.attribute :root_dir
+            dep.attribute :root_dir do |value|
+              Pathname.new(value).append("secrets").to_s
+            end
             dep.attribute :s3_bucket
           end
         end
@@ -71,6 +84,7 @@ RSpec.describe GlueGun::DSL do
     attribute :root_dir, :string
 
     attribute :processed_attr, :integer, default: 0
+    attribute :polars_args, :hash, default: {}
 
     def processed_attr=(value)
       super(value.to_i * 2)
@@ -93,6 +107,7 @@ RSpec.describe GlueGun::DSL do
         option.set_class Test::Data::Datasource::S3Datasource
         option.attribute :root_dir
         option.attribute :s3_bucket, required: true, default: "default-bucket"
+        option.attribute :polars_args, required: true, default: {}
       end
 
       dependency.option :directory do |option|
@@ -134,8 +149,11 @@ RSpec.describe GlueGun::DSL do
 
   describe "Attributes" do
     it "defines an attribute with a default on dependencies" do
-      instance = test_class.new(age: 30, datasource: { s3: { s3_access_key_id: "123", s3_secret_access_key: "456" } })
+      polars_args = { dtypes: { a: "float" } }
+      instance = test_class.new(age: 30, polars_args: { dtypes: { a: "float" } },
+                                datasource: { s3: { s3_access_key_id: "123", s3_secret_access_key: "456" } })
       expect(instance.datasource.s3_bucket).to eq "default-bucket"
+      expect(instance.datasource.polars_args).to eq(polars_args)
     end
 
     it "defines picklist" do
@@ -241,9 +259,14 @@ RSpec.describe GlueGun::DSL do
       instance = test_class.new(age: 30, datasource: s3_attrs)
       expect(instance.datasource.root_dir).to eq PROJECT_ROOT.join("spec").to_s
 
+      # Block gets called to append whenver value gets updated!
+      expect(instance.datasource.synced_directory.root_dir).to eq PROJECT_ROOT.join("spec").join("secrets").to_s
+
       instance.root_dir = PROJECT_ROOT.to_s
       expect(instance.datasource.root_dir).to eq PROJECT_ROOT.to_s
-      expect(instance.datasource.synced_directory.root_dir).to eq PROJECT_ROOT.to_s
+
+      # Block gets called to append whenver value gets updated!
+      expect(instance.datasource.synced_directory.root_dir).to eq PROJECT_ROOT.join("secrets").to_s
       expect(instance.preprocessor.directory).to eq PROJECT_ROOT.to_s
 
       instance.datasource.s3_bucket = "different-bucket"

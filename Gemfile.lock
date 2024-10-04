@@ -1,9 +1,9 @@
 PATH
   remote: .
   specs:
-    glue_gun_dsl (0.1.6)
-      activemodel (>= 5.2, < 8)
-      activesupport (>= 5.2, < 8)
+    glue_gun_dsl (0.1.8)
+      activemodel (>= 6, < 8)
+      activesupport (>= 6, < 8)
 
 GEM
   remote: https://rubygems.org/

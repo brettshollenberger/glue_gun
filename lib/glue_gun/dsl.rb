@@ -268,8 +268,12 @@ module GlueGun
           (attr_config.source == attr_name.to_sym) || (attr_config.name == attr_name.to_sym)
         end
 
-        bound_attrs.each do |dep_attr_name, _|
-          dependency_instance.send("#{dep_attr_name}=", value) if dependency_instance.respond_to?("#{dep_attr_name}=")
+        bound_attrs.each do |dep_attr_name, config_attr|
+          block = config_attr.block.present? ? config_attr.block : proc { |att| att }
+          if dependency_instance.respond_to?("#{dep_attr_name}=")
+            dependency_instance.send("#{dep_attr_name}=",
+                                     block.call(value))
+          end
         end
       end
     end
