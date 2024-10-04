@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    glue_gun_dsl (0.1.3)
+    glue_gun_dsl (0.1.5)
       activemodel (>= 5.2, < 8)
       activesupport (>= 5.2, < 8)
 

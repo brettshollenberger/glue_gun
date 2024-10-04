@@ -53,10 +53,8 @@ RSpec.describe GlueGun::DSL do
         end
 
         class PolarsDatasource
-          include ActiveModel::Model
-          include ActiveModel::Attributes
+          include GlueGun::DSL
           attribute :df
-
           validates :df, presence: true
         end
       end
@@ -326,6 +324,9 @@ RSpec.describe GlueGun::DSL do
 
   describe "Inheritance" do
     it "inherits attributes and dependencies from the parent class" do
+      inst = SomethingCool.new(age: 30)
+      expect(inst.id).to eq "Default Name"
+
       instance = child_class.new(age: 30)
       expect(instance.id).to eq("Default Name")
       expect(instance.child_attr).to eq("Child Attr")

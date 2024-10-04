@@ -7,6 +7,7 @@ module GlueGun
       include ActiveModel::Attributes
       include ActiveModel::Validations
       include ActiveModel::AttributeAssignment
+      include ActiveModel::Dirty
 
       class_attribute :attribute_definitions, instance_writer: false, default: {}
       class_attribute :dependency_definitions, instance_writer: false, default: {}
@@ -24,16 +25,22 @@ module GlueGun
       class << self
         prepend ClassMethods
       end
+
+      # Overriding ActiveModel.assign_attributes to ensure change propagation to dependenices
+      def assign_attributes(new_attributes)
+        super(new_attributes)
+        propagate_changes if initialized?
+      end
     end
 
     module Initialization
-      def initialize(attributes = {})
-        attributes = attributes.symbolize_keys
+      def initialize(attrs = {})
+        attrs = attrs.symbolize_keys
         # Separate dependency configurations from normal attributes
         dependency_attributes = {}
         normal_attributes = {}
 
-        attributes.each do |key, value|
+        attrs.each do |key, value|
           if self.class.dependency_definitions.key?(key)
             dependency_attributes[key] = value
           else
@@ -58,10 +65,12 @@ module GlueGun
 
     module ClassMethods
       # Override the attribute method to define custom setters
-      def attribute(name, type = :string, **options)
-        # Call the original attribute method from ActiveModel::Attributes
+      def attribute(name, type = nil, **options)
         super(name, type, **options)
         attribute_definitions[name.to_sym] = { type: type, options: options }
+
+        # Define dirty tracking for the attribute
+        define_attribute_methods name
 
         attribute_methods_module = const_get(:AttributeMethods)
 
@@ -232,6 +241,16 @@ module GlueGun
       dependency_instance = dependency_class.new(dep_attributes)
       dependency_instance.validate! if dependency_instance.respond_to?(:validate!)
       dependency_instance
+    end
+
+    def propagate_changes
+      changed_attributes.each do |attr_name, _old_value|
+        new_value = read_attribute(attr_name)
+        propagate_attribute_change(attr_name, new_value)
+      end
+
+      # Clear the changes after propagation
+      changes_applied
     end
 
     def propagate_attribute_change(attr_name, value)
