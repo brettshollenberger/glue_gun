@@ -81,7 +81,7 @@ module GlueGun
 
         attribute_methods_module.class_eval do
           define_method "#{name}=" do |value|
-            super(value)
+            value = super(value)
             propagate_attribute_change(name, value) if initialized?
           end
         end
@@ -181,21 +181,19 @@ module GlueGun
     def build_dependency_attributes(option_config, dep_attributes)
       option_config.attributes.each do |attr_name, attr_config|
         # If the attribute is already provided, use it
-        if dep_attributes.key?(attr_name)
-          value = dep_attributes[attr_name]
-        else
-          value = if attr_config.source && respond_to?(attr_config.source)
-                    send(attr_config.source)
-                  elsif respond_to?(attr_name)
-                    send(attr_name)
-                  else
-                    attr_config.default
-                  end
+        value = if dep_attributes.key?(attr_name)
+                  dep_attributes[attr_name]
+                elsif attr_config.source && respond_to?(attr_config.source)
+                  send(attr_config.source)
+                elsif respond_to?(attr_name)
+                  send(attr_name)
+                else
+                  attr_config.default
+                end
 
-          value = attr_config.process_value(value, self) if attr_config.respond_to?(:process_value)
+        value = attr_config.process_value(value, self) if attr_config.respond_to?(:process_value)
 
-          dep_attributes[attr_name] = value
-        end
+        dep_attributes[attr_name] = value
 
         # After getting the value, check if it's required and nil
         if value.nil? && attr_config.required

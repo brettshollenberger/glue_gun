@@ -27,6 +27,7 @@ RSpec.describe GlueGun::DSL do
 
         attribute :preprocessing_steps, :hash
         attribute :directory, :string
+        attribute :complex_chain, :string
       end
 
       class SyncedDir
@@ -68,6 +69,7 @@ RSpec.describe GlueGun::DSL do
         class PolarsDatasource
           include GlueGun::DSL
           attribute :df
+          attribute :complex_chain
           validates :df, presence: true
         end
       end
@@ -83,6 +85,11 @@ RSpec.describe GlueGun::DSL do
     validates :age, presence: true
     attribute :root_dir, :string
 
+    attribute :complex_chain, :string
+    def complex_chain=(value)
+      super("#{value} is cool")
+    end
+
     attribute :processed_attr, :integer, default: 0
     attribute :polars_args, :hash, default: {}
 
@@ -95,6 +102,9 @@ RSpec.describe GlueGun::DSL do
     dependency :preprocessor do |dependency|
       dependency.set_class Test::Data::PreprocessingSteps
       dependency.attribute :directory, source: :root_dir
+      dependency.attribute :complex_chain do |value|
+        "#{value} and rocks my socks"
+      end
     end
 
     dependency :datasource do |dependency|
@@ -106,7 +116,8 @@ RSpec.describe GlueGun::DSL do
       dependency.option :s3 do |option|
         option.set_class Test::Data::Datasource::S3Datasource
         option.attribute :root_dir
-        option.attribute :s3_bucket, required: true, default: "default-bucket"
+        option.attribute :s3_bucket, required: true
+        option.attribute :s3_access_key_id, default: "12345"
         option.attribute :polars_args, required: true, default: {}
       end
 
@@ -116,6 +127,9 @@ RSpec.describe GlueGun::DSL do
 
       dependency.option :polars do |option|
         option.set_class Test::Data::Datasource::PolarsDatasource
+        option.attribute :complex_chain do |value|
+          "#{value} and super cool"
+        end
       end
 
       dependency.when do |dep|
@@ -151,8 +165,8 @@ RSpec.describe GlueGun::DSL do
     it "defines an attribute with a default on dependencies" do
       polars_args = { dtypes: { a: "float" } }
       instance = test_class.new(age: 30, polars_args: { dtypes: { a: "float" } },
-                                datasource: { s3: { s3_access_key_id: "123", s3_secret_access_key: "456" } })
-      expect(instance.datasource.s3_bucket).to eq "default-bucket"
+                                datasource: { s3: { s3_bucket: "default-bucket", s3_secret_access_key: "456" } })
+      expect(instance.datasource.s3_access_key_id).to eq "12345"
       expect(instance.datasource.polars_args).to eq(polars_args)
     end
 
@@ -271,6 +285,21 @@ RSpec.describe GlueGun::DSL do
 
       instance.datasource.s3_bucket = "different-bucket"
       expect(instance.datasource.synced_directory.s3_bucket).to eq "different-bucket"
+    end
+
+    it "passes to intermediate blocks always" do
+      instance = test_class.new(age: 30, datasource: Polars::DataFrame.new({ a: [1, 2, 3] }),
+                                complex_chain: "This thang")
+
+      expect(instance.complex_chain).to eq "This thang is cool"
+      expect(instance.preprocessor.complex_chain).to eq "This thang is cool and rocks my socks"
+      expect(instance.datasource.complex_chain).to eq "This thang is cool and super cool"
+
+      instance.complex_chain = "Other thangs"
+
+      expect(instance.complex_chain).to eq "Other thangs is cool"
+      expect(instance.preprocessor.complex_chain).to eq "Other thangs is cool and rocks my socks"
+      expect(instance.datasource.complex_chain).to eq "Other thangs is cool and super cool"
     end
   end
 
