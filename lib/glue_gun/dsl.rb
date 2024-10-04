@@ -64,8 +64,13 @@ module GlueGun
     end
 
     module ClassMethods
+      DEFAULT_TYPE = if ActiveModel.version >= Gem::Version.new("7")
+                       nil
+                     elsif ActiveModel.version >= Gem::Version.new("5")
+                       ActiveModel::Type::Value.new
+                     end
       # Override the attribute method to define custom setters
-      def attribute(name, type = nil, **options)
+      def attribute(name, type = DEFAULT_TYPE, **options)
         super(name, type, **options)
         attribute_definitions[name.to_sym] = { type: type, options: options }
 

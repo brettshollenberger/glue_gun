@@ -416,7 +416,12 @@ We welcome contributions to GlueGun::DSL! To contribute:
 3. **Write** tests for your changes.
 4. **Submit** a pull request with a detailed explanation.
 
-Please ensure your code follows the project's coding standards and passes all tests.
+Please ensure your code follows the project's coding standards and passes all tests. To test against different versions of ActiveModel:
+
+```
+bundle exec appraisal activemodel-6 guard
+bundle exec appraisal activemodel-7 guard
+```
 
 ---
 

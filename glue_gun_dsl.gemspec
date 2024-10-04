@@ -14,10 +14,11 @@ Gem::Specification.new do |spec|
   spec.files         = Dir["lib/**/*.rb"]
   spec.required_ruby_version = ">= 2.5"
 
-  spec.add_dependency "activemodel", ">= 5.2", "< 8"
-  spec.add_dependency "activesupport", ">= 5.2", "< 8"
+  spec.add_dependency "activemodel", ">= 6", "< 8"
+  spec.add_dependency "activesupport", ">= 6", "< 8"
 
   # Optional: Add development dependencies
+  spec.add_development_dependency "appraisal"
   spec.add_development_dependency "guard"
   spec.add_development_dependency "ostruct"
   spec.add_development_dependency "polars-df"
