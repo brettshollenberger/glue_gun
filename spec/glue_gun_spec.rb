@@ -123,6 +123,9 @@ RSpec.describe GlueGun::DSL do
 
       dependency.option :directory do |option|
         option.set_class Test::Data::Datasource::FileDatasource
+        option.attribute :root_dir do |value|
+          File.join(value, "bingo/bangos")
+        end
       end
 
       dependency.option :polars do |option|
@@ -340,12 +343,6 @@ RSpec.describe GlueGun::DSL do
       expect(instance.datasource.synced_directory.s3_bucket).to eq("my-bucket")
     end
 
-    it "uses the when block with a string input for local" do
-      instance = test_class.new(age: 30, datasource: "/local/path")
-      expect(instance.datasource).to be_a(Test::Data::Datasource::FileDatasource)
-      expect(instance.datasource.root_dir).to eq("/local/path")
-    end
-
     it "uses the default option when no specific option is provided" do
       instance = test_class.new(age: 30)
       expect(instance.datasource).to be_a(NoOp)
@@ -419,6 +416,26 @@ RSpec.describe GlueGun::DSL do
           end
         end
       end.to raise_error(ArgumentError, /Multiple default options found for invalid/)
+    end
+  end
+
+  describe "When Block" do
+    it "uses the when block with a string input for local" do
+      instance = test_class.new(age: 30, datasource: "/local/path")
+      expect(instance.datasource).to be_a(Test::Data::Datasource::FileDatasource)
+      expect(instance.datasource.root_dir).to eq("/local/path")
+    end
+
+    it "does not call attribute blocks when when blocks are invoked" do
+      instance = test_class.new(age: 30, datasource: { directory: {} })
+      expect(instance.datasource).to be_a(Test::Data::Datasource::FileDatasource)
+
+      # When when block NOT invoked, block is called
+      expect(instance.datasource.root_dir).to eq(PROJECT_ROOT.join("spec/bingo/bangos").to_s)
+
+      # When when block IS invoked
+      instance = test_class.new(age: 30, datasource: "/usr/path")
+      expect(instance.datasource.root_dir).to eq "/usr/path"
     end
   end
 end
