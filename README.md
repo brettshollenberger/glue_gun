@@ -2,7 +2,7 @@
 
 **All the magic you love from ActiveRecord/ActiveModel, plus dependency-management as a first-class citizen.**
 
-GlueGun::DSL enhances ActiveModel by introducing powerful dependency injection capabilities directly into your Ruby objects. Whether you're working with ActiveRecord models or Plain Old Ruby Objects (POROs), GlueGun::DSL allows you to manage interchangeable dependencies with ease, handling complex relationships between components while maintaining clean and maintainable code.
+GlueGun::DSL enhances ActiveModel by introducing powerful dependency injection capabilities directly into your Ruby objects. Whether you're working with **ActiveRecord** models **or Plain Old Ruby Objects** (POROs), GlueGun::DSL allows you to manage interchangeable dependencies with ease, handling complex relationships between components while maintaining clean and maintainable code.
 
 ## Table of Contents
 
