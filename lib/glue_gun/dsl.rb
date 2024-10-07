@@ -33,6 +33,16 @@ module GlueGun
         super(new_attributes)
         propagate_changes if initialized?
       end
+
+      if ancestors.include?(ActiveRecord::Base)
+        columns.each do |column|
+          # Skip if already defined via GlueGun::DSL's attribute method
+          next if attribute_definitions.key?(column.name.to_sym)
+
+          # Define a ConfigAttr for each ActiveRecord column
+          attribute(column.name.to_sym, column.type)
+        end
+      end
     end
 
     module Initialization
@@ -289,6 +299,25 @@ module GlueGun
 
     def dependencies
       @dependencies ||= {}
+    end
+
+    def validate_dependencies
+      errors.clear
+      self.class.dependency_definitions.keys.each do |component_type|
+        dependency = send(component_type)
+
+        # Only validate if the dependency responds to `valid?`
+        next unless dependency.respond_to?(:valid?) && !dependency.valid?
+
+        dependency.errors.each do |error|
+          if error.is_a?(ActiveModel::Error)
+            attribute = error.attribute
+            message = error.message
+          end
+          errors.add("#{component_type}.#{attribute}", message)
+        end
+      end
+      errors.none?
     end
 
     class ConfigAttr

@@ -17,6 +17,12 @@ ActiveRecord::Schema.define do
     t.integer :processed_field
     t.timestamps
   end
+
+  create_table :active_record_dependencies do |t|
+    t.string :custom_field
+    t.integer :processed_field
+    t.timestamps
+  end
 end
 
 RSpec.configure do |config|

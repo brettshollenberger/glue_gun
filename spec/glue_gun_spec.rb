@@ -185,8 +185,11 @@ RSpec.describe GlueGun::DSL do
       a = Picklist.new(fruits: "apple")
       b = Picklist.new(fruits: "pear")
       expect(a.fruits).to eq "apple"
+      expect(a).to be_valid
       expect(b.fruits).to eq "pear"
-      expect { Picklist.new(fruits: "raspberry") }.to raise_error(ActiveModel::ValidationError)
+      expect(b).to be_valid
+      c = Picklist.new(fruits: "raspberry")
+      expect(c).to_not be_valid
     end
 
     it "defines conditional picklist" do
@@ -215,17 +218,18 @@ RSpec.describe GlueGun::DSL do
       end
 
       a = ConditionalPicklist.new(task: "regression", metrics: "rmse")
-      expect(a.valid?).to be true
+      expect(a).to be_valid
       b = ConditionalPicklist.new(task: "classification", metrics: "accuracy")
-      expect(b.valid?).to be true
-      expect do
-        ConditionalPicklist.new(task: "regression",
-                                metrics: "accuracy")
-      end.to raise_error(ActiveModel::ValidationError, /accuracy is not an allowed metric for task regression/)
+      expect(b).to be_valid
+      c = ConditionalPicklist.new(task: "regression", metrics: "accuracy")
+      expect(c).to_not be_valid
+      expect(c.errors[:metrics]).to include("accuracy is not an allowed metric for task regression")
     end
 
-    it "raises an error when a required attribute is not provided" do
-      expect { test_class.new(datasource: s3_attrs) }.to raise_error(ActiveModel::ValidationError, /Age can't be blank/)
+    it "uses validations" do
+      invalid_inst = test_class.new(datasource: s3_attrs)
+      expect(invalid_inst).to_not be_valid
+      expect(invalid_inst.errors.to_hash).to eq({ age: ["can't be blank"] })
     end
 
     it "processes attributes with a block" do
@@ -349,10 +353,14 @@ RSpec.describe GlueGun::DSL do
       expect(instance.datasource).to be_a(NoOp)
     end
 
-    it "raises an error when a required attribute for a dependency is not provided" do
-      expect do
-        test_class.new(age: 30, datasource: { s3: { s3_bucket: nil } })
-      end.to raise_error(ArgumentError, /Missing required attribute 's3_bucket'/)
+    it "is valid when deps invalid, but will validate dependencies when asked" do
+      inst = test_class.new(age: 30, datasource: { s3: { s3_bucket: nil } })
+      expect(inst).to be_valid
+      expect(inst.validate_dependencies).to be(false)
+      expect(inst.errors.to_hash).to eq({
+                                          "datasource.s3_bucket": ["can't be blank"],
+                                          "datasource.s3_secret_access_key": ["can't be blank"]
+                                        })
     end
 
     it "uses the when block to determine the correct option when using when block" do
@@ -441,17 +449,27 @@ RSpec.describe GlueGun::DSL do
   end
 
   # Add a new ActiveRecord-based test class
+  class ActiveRecordDependency < ActiveRecord::Base
+    include GlueGun::DSL
+    validates :custom_field, presence: true
+    validates :processed_field, presence: true
+  end
+
   class ActiveRecordTest < ActiveRecord::Base
     include GlueGun::DSL
 
     attribute :root_dir, :string
-    # attribute :custom_field, :string
-    # attribute :processed_field, :integer
 
     validates :custom_field, presence: true
 
     def processed_field=(value)
       super(value.to_i * 3)
+    end
+
+    dependency :ar_dependency do |dependency|
+      dependency.set_class ActiveRecordDependency
+      dependency.attribute :custom_field
+      dependency.attribute :processed_field
     end
 
     dependency :preprocessor do |dependency|
@@ -552,21 +570,32 @@ RSpec.describe GlueGun::DSL do
                                                           })
     end
 
-    it "validates dependencies when validating parent", :focus do
+    it "validates dependencies when validating parent" do
       expect(ar_instance).to be_valid
+      expect(ar_instance.validate_dependencies).to be(false)
+      expect(ar_instance.errors.to_hash).to eq({
+                                                 "ar_dependency.processed_field": ["can't be blank"]
+                                               })
+      ar_instance.processed_field = 1
+      expect(ar_instance).to be_valid
+      expect(ar_instance.validate_dependencies).to be true
+      ar_instance.save
+      inst = ActiveRecordTest.find(ar_instance.id)
+      expect(ar_instance.processed_field).to eq inst.processed_field
       ar_instance.datasource = { s3: { s3_bucket: "my-bucket" } }
       expect(ar_instance.datasource).to_not be_valid
-      expect(ar_instance).to_not be_valid
+      expect(ar_instance.validate_dependencies).to be(false)
+      expect(ar_instance.errors.to_hash).to eq({
+                                                 "datasource.s3_access_key_id": ["can't be blank"],
+                                                 "datasource.s3_secret_access_key": ["can't be blank"]
+                                               })
+      ar_instance.datasource.s3_access_key_id = "123"
+      ar_instance.datasource.s3_secret_access_key = "123"
+      expect(ar_instance.validate_dependencies).to be true
     end
 
     it "raises an error for unknown attributes" do
       expect { ar_instance.unknown_attribute = "value" }.to raise_error(NoMethodError)
-    end
-
-    it "works with ActiveRecord associations" do
-      # This test assumes that ActiveRecordTest has a belongs_to association with another model
-      # You may need to adjust this based on your actual ActiveRecord setup
-      expect(ActiveRecordTest.reflect_on_all_associations.map(&:name)).to include(:active_record_dependency)
     end
   end
 end
