@@ -3,11 +3,14 @@ module GlueGun
     extend ActiveSupport::Concern
 
     included do
-      include ActiveModel::Model
-      include ActiveModel::Attributes
-      include ActiveModel::Validations
-      include ActiveModel::AttributeAssignment
-      include ActiveModel::Dirty
+      unless ancestors.include?(ActiveRecord::Base)
+        include ActiveModel::Model
+        include ActiveModel::Attributes
+        include ActiveModel::Validations
+        include ActiveModel::AttributeAssignment
+        include ActiveModel::Dirty
+        include ActiveRecord::Callbacks
+      end
 
       class_attribute :attribute_definitions, instance_writer: false, default: {}
       class_attribute :dependency_definitions, instance_writer: false, default: {}
@@ -18,7 +21,6 @@ module GlueGun
       const_set(:AttributeMethods, attribute_methods_module)
       prepend attribute_methods_module
 
-      # Prepend Initialization module to override initialize
       prepend Initialization
 
       # Prepend ClassMethods into the singleton class of the including class
@@ -35,6 +37,7 @@ module GlueGun
 
     module Initialization
       def initialize(attrs = {})
+        attrs ||= {}
         attrs = attrs.symbolize_keys
         # Separate dependency configurations from normal attributes
         dependency_attributes = {}
@@ -56,9 +59,6 @@ module GlueGun
         # Initialize dependencies after attributes have been set
         initialize_dependencies(dependency_attributes)
 
-        # Validate the main object's attributes
-        validate!
-
         @initialized = true
       end
     end
@@ -75,7 +75,7 @@ module GlueGun
         attribute_definitions[name.to_sym] = { type: type, options: options }
 
         # Define dirty tracking for the attribute
-        define_attribute_methods name
+        define_attribute_methods name unless ancestors.include?(ActiveRecord::Base)
 
         attribute_methods_module = const_get(:AttributeMethods)
 
@@ -105,6 +105,14 @@ module GlueGun
         define_method component_type do
           instance_variable_get("@#{component_type}") ||
             instance_variable_set("@#{component_type}", initialize_dependency(component_type))
+        end
+
+        attribute_methods_module = const_get(:AttributeMethods)
+        attribute_methods_module.class_eval do
+          define_method "#{component_type}=" do |init_args|
+            instance_variable_set("@#{component_type}", initialize_dependency(component_type, init_args))
+            # propagate_attribute_change(component_type, value) if initialized?
+          end
         end
       end
 
@@ -194,11 +202,6 @@ module GlueGun
           value = attr_config.process_value(value, self) if attr_config.respond_to?(:process_value)
           dep_attributes[attr_name] = value
         end
-
-        # After getting the value, check if it's required and nil
-        if value.nil? && attr_config.required
-          raise ArgumentError, "Missing required attribute '#{attr_name}' for #{option_config.class_name}"
-        end
       end
 
       dep_attributes
@@ -242,7 +245,7 @@ module GlueGun
     def instantiate_dependency(option_config, dep_attributes)
       dependency_class = option_config.class_name
       dependency_instance = dependency_class.new(dep_attributes)
-      dependency_instance.validate! if dependency_instance.respond_to?(:validate!)
+      dependency_instance.validate! if false # dependency_instance.respond_to?(:validate!)
       dependency_instance
     end
 

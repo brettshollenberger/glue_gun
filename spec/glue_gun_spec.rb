@@ -28,6 +28,7 @@ RSpec.describe GlueGun::DSL do
         attribute :preprocessing_steps, :hash
         attribute :directory, :string
         attribute :complex_chain, :string
+        attribute :custom_field, :string
       end
 
       class SyncedDir
@@ -436,6 +437,136 @@ RSpec.describe GlueGun::DSL do
       # When when block IS invoked
       instance = test_class.new(age: 30, datasource: "/usr/path")
       expect(instance.datasource.root_dir).to eq "/usr/path"
+    end
+  end
+
+  # Add a new ActiveRecord-based test class
+  class ActiveRecordTest < ActiveRecord::Base
+    include GlueGun::DSL
+
+    attribute :root_dir, :string
+    # attribute :custom_field, :string
+    # attribute :processed_field, :integer
+
+    validates :custom_field, presence: true
+
+    def processed_field=(value)
+      super(value.to_i * 3)
+    end
+
+    dependency :preprocessor do |dependency|
+      dependency.set_class Test::Data::PreprocessingSteps
+      dependency.attribute :directory, source: :root_dir
+      dependency.attribute :custom_field
+
+      dependency.when do |dep|
+        case dep
+        when String
+          { option: :default, as: :directory }
+        end
+      end
+    end
+
+    dependency :datasource do |dependency|
+      dependency.option :no_op do |option|
+        option.default
+        option.set_class NoOp
+      end
+
+      dependency.option :s3 do |option|
+        option.set_class Test::Data::Datasource::S3Datasource
+        option.attribute :root_dir
+        option.attribute :s3_bucket, required: true
+        option.attribute :s3_access_key_id, required: true
+        option.attribute :polars_args, required: true, default: {}
+      end
+
+      dependency.option :directory do |option|
+        option.set_class Test::Data::Datasource::FileDatasource
+        option.attribute :root_dir do |value|
+          File.join(value, "bingo/bangos")
+        end
+      end
+
+      dependency.option :polars do |option|
+        option.set_class Test::Data::Datasource::PolarsDatasource
+        option.attribute :complex_chain do |value|
+          "#{value} and super cool"
+        end
+      end
+
+      dependency.when do |dep|
+        case dep
+        when Polars::DataFrame
+          { option: :polars, as: :df }
+        when String
+          { option: :directory, as: :root_dir }
+        end
+      end
+    end
+  end
+
+  describe "ActiveRecord Integration" do
+    let(:ar_instance) { ActiveRecordTest.new(custom_field: "test_value") }
+
+    it "defines attributes on an ActiveRecord model" do
+      expect(ar_instance.custom_field).to eq "test_value"
+      expect(ar_instance.root_dir).to eq File.join(PROJECT_ROOT, "spec")
+    end
+
+    it "processes attributes with a block" do
+      ar_instance.processed_field = "5"
+      expect(ar_instance.processed_field).to eq 15
+    end
+
+    it "validates attributes" do
+      invalid_instance = ActiveRecordTest.new
+      expect(invalid_instance.valid?).to be false
+      expect(invalid_instance.errors[:custom_field]).to include("can't be blank")
+    end
+
+    it "propagates bound attributes when initialized post-hoc" do
+      ar_instance.preprocessor = { custom_field: "burger king" }
+      expect(ar_instance.preprocessor.custom_field).to eq "burger king" # Override
+      expect(ar_instance.preprocessor.directory).to eq ar_instance.root_dir # Propagate
+      expect(ar_instance.preprocessor.directory).to eq File.join(PROJECT_ROOT, "spec")
+
+      ar_instance.root_dir = "/etc"
+      expect(ar_instance.preprocessor.directory).to eq "/etc"
+    end
+
+    it "uses the when block for dependency options" do
+      ar_instance.preprocessor = "dependency_path"
+      expect(ar_instance.preprocessor).to be_a(Test::Data::PreprocessingSteps)
+      expect(ar_instance.preprocessor.directory).to eq "dependency_path"
+      expect(ar_instance.preprocessor.custom_field).to eq "test_value"
+    end
+
+    it "defines dependencies with options" do
+      ar_instance.datasource = { s3: { s3_bucket: "my-bucket" } }
+      expect(ar_instance.datasource).to be_a(Test::Data::Datasource::S3Datasource)
+      expect(ar_instance.datasource).to_not be_valid
+      expect(ar_instance.datasource.errors.to_hash).to eq({
+                                                            s3_access_key_id: ["can't be blank"],
+                                                            s3_secret_access_key: ["can't be blank"]
+                                                          })
+    end
+
+    it "validates dependencies when validating parent", :focus do
+      expect(ar_instance).to be_valid
+      ar_instance.datasource = { s3: { s3_bucket: "my-bucket" } }
+      expect(ar_instance.datasource).to_not be_valid
+      expect(ar_instance).to_not be_valid
+    end
+
+    it "raises an error for unknown attributes" do
+      expect { ar_instance.unknown_attribute = "value" }.to raise_error(NoMethodError)
+    end
+
+    it "works with ActiveRecord associations" do
+      # This test assumes that ActiveRecordTest has a belongs_to association with another model
+      # You may need to adjust this based on your actual ActiveRecord setup
+      expect(ActiveRecordTest.reflect_on_all_associations.map(&:name)).to include(:active_record_dependency)
     end
   end
 end

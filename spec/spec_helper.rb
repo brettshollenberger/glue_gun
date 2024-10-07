@@ -1,8 +1,23 @@
 # frozen_string_literal: true
 
+require "bundler"
+require "combustion"
+
+Bundler.require :default, :development
+
+Combustion.initialize! :active_record # unless defined?(Combustion::Application)
+
 require "glue_gun"
-require "ostruct"
-require "polars-df"
+
+ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
+
+ActiveRecord::Schema.define do
+  create_table :active_record_tests do |t|
+    t.string :custom_field
+    t.integer :processed_field
+    t.timestamps
+  end
+end
 
 RSpec.configure do |config|
   # Enable flags like --only-failures and --next-failure
