@@ -74,6 +74,9 @@ end
 # Usage
 user = User.new(email: 'user@example.com')
 user.mailer # => Instance of SmtpMailer with server: 'smtp.example.com', port: 587
+
+user = User.new(email: 'user@example.com', mailer: {sendgrid: {api_key: "12345"}})
+user.mailer # => Instance of SendGridMailer with api_key set
 ```
 
 ### Using with POROs
