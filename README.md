@@ -1,47 +1,26 @@
+Certainly! Below is the updated **README** for **GlueGun::DSL**, reflecting the flexibility to use it with both **ActiveRecord** models and **Plain Old Ruby Objects (POROs)**. The changes include clarifications in the introduction, additional examples, and notes to guide users on choosing the appropriate usage based on their needs.
+
+---
+
 # GlueGun::DSL
 
 **All the helpers you know and love from ActiveModel, plus dependency injection as a first-class citizen.**
 
-GlueGun::DSL enhances `ActiveModel` by introducing powerful dependency injection capabilities directly into your Ruby objects. It allows you to manage interchangable dependencies with ease, managing complex relationships between components while maintaining clean and maintainable code.
-
-```ruby
-
-class Model
-  include GlueGun::DSL
-
-  define_dependency :database do |dependency|
-   dependency.option :mysql do |option|
-     option.default # set a default option!
-     option.set_class 'MySQLDatabase'
-     option.attribute :host, required: true
-     option.attribute :port, default: 3306
-   end
-
-   dependency.option :postgresql do |option|
-     option.set_class 'PostgreSQLDatabase'
-     option.attribute :host, required: true
-     option.attribute :port, default: 5432
-   end
-  end
-end
-
-instance = Model.new(database: { postgres: { host: "localhost" } })
-instance.database # is a PostgreSQLDatabase instance with host: localhost, port: 5432
-```
-
----
+GlueGun::DSL enhances ActiveModel by introducing powerful dependency injection capabilities directly into your Ruby objects. Whether you're working with ActiveRecord models or Plain Old Ruby Objects (POROs), GlueGun::DSL allows you to manage interchangeable dependencies with ease, handling complex relationships between components while maintaining clean and maintainable code.
 
 ## Table of Contents
 
 - [Introduction](#introduction)
 - [Getting Started](#getting-started)
+  - [Using with ActiveRecord Models](#using-with-activerecord-models)
+  - [Using with POROs](#using-with-poros)
 - [Installation](#installation)
 - [Dependency Injection](#dependency-injection)
-  - [Defining Dependencies](#defining-dependencies)
+- [Defining Dependencies](#defining-dependencies)
   - [Single-Option Dependencies](#single-option-dependencies)
   - [Multi-Option Dependencies](#multi-option-dependencies)
   - [Dynamic Dependency Resolution with `when`](#dynamic-dependency-resolution-with-when)
-  - [Attribute Binding Between Components](#attribute-binding-between-components)
+- [Attribute Binding Between Components](#attribute-binding-between-components)
 - [Inheritance and Overrides](#inheritance-and-overrides)
 - [Complete Examples](#complete-examples)
   - [Building a Complex Data Pipeline](#building-a-complex-data-pipeline)
@@ -55,37 +34,115 @@ instance.database # is a PostgreSQLDatabase instance with host: localhost, port:
 - [Contributing](#contributing)
 - [License](#license)
 
----
-
 ## Introduction
 
-GlueGun::DSL extends `ActiveModel` by making dependency injection a first-class feature. While `ActiveModel` provides a robust framework for attributes, validations, and type casting, GlueGun::DSL builds upon it to simplify the management of complex dependencies between components. It's designed to help you write cleaner, more modular code by allowing you to define and configure dependencies directly within your models.
+GlueGun::DSL extends ActiveModel by making dependency injection a first-class feature. While ActiveModel provides a robust framework for attributes, validations, and type casting, GlueGun::DSL builds upon it to simplify the management of complex dependencies between components. It's designed to help you write cleaner, more modular code by allowing you to define and configure dependencies directly within your models or Ruby objects.
 
----
+Whether you're enhancing an **ActiveRecord** model or working with a **PORO**, GlueGun::DSL provides the tools to manage dependencies effectively.
 
 ## Getting Started
 
-To use GlueGun::DSL in your class, include it after requiring the gem:
+To use GlueGun::DSL in your class, include it after requiring the gem. GlueGun::DSL is compatible with both **ActiveRecord** models and **Plain Old Ruby Objects (POROs)**.
+
+### Using with ActiveRecord Models
+
+When using GlueGun::DSL with **ActiveRecord**, you can leverage ActiveRecord's powerful ORM features alongside GlueGun's dependency injection.
 
 ```ruby
+# app/models/user.rb
 require 'glue_gun'
 
-class MyClass
+class User < ApplicationRecord
   include GlueGun::DSL
 
-  # Define attributes and dependencies here
+  attribute :role, :string, default: 'member'
+
+  define_dependency :mailer do |dependency|
+    dependency.option :smtp do |option|
+      option.set_class 'SmtpMailer'
+      option.attribute :server, default: 'smtp.example.com'
+      option.attribute :port, default: 587
+    end
+
+    dependency.option :sendgrid do |option|
+      option.set_class 'SendGridMailer'
+      option.attribute :api_key, required: true
+    end
+
+    dependency.default_option_name = :smtp
+  end
+
+  validates :role, presence: true
 end
+
+# Usage
+user = User.new(email: 'user@example.com')
+user.mailer # => Instance of SmtpMailer with server: 'smtp.example.com', port: 587
 ```
 
-This inclusion provides all the features of `ActiveModel`, plus the enhanced dependency injection capabilities of GlueGun::DSL.
+### Using with POROs
 
----
+GlueGun::DSL is equally powerful when used with Plain Old Ruby Objects (POROs), allowing you to build flexible and testable classes without the overhead of ActiveRecord.
+
+```ruby
+# app/services/payment_processor.rb
+require 'glue_gun'
+
+class PaymentProcessor
+  include GlueGun::DSL
+
+  attribute :amount, :integer
+  attribute :currency, :string, default: 'USD'
+
+  define_dependency :gateway do |dependency|
+    dependency.option :stripe do |option|
+      option.set_class 'StripeGateway'
+      option.attribute :api_key, required: true
+    end
+
+    dependency.option :paypal do |option|
+      option.set_class 'PaypalGateway'
+      option.attribute :client_id, required: true
+      option.attribute :client_secret, required: true
+    end
+
+    dependency.default_option_name = :stripe
+  end
+
+  validates :amount, presence: true, numericality: { greater_than: 0 }
+  validates :currency, presence: true
+end
+
+# Usage
+processor = PaymentProcessor.new(amount: 1000, gateway: { paypal: { client_id: 'abc', client_secret: 'xyz' } })
+processor.gateway # => Instance of PaypalGateway with client_id: 'abc', client_secret: 'xyz'
+```
+
+## Installation
+
+Add this line to your application's Gemfile:
+
+```ruby
+gem 'glue_gun_dsl'
+```
+
+And then execute:
+
+```bash
+bundle install
+```
+
+Or install it yourself as:
+
+```bash
+gem install glue_gun_dsl
+```
 
 ## Dependency Injection
 
-One of the key differences between GlueGun::DSL and `ActiveModel` is the introduction of dependency injection as a core feature. GlueGun::DSL allows you to define dependencies that your class relies on, configure them flexibly, and even bind attributes between your class and its dependencies.
+One of the key differences between GlueGun::DSL and ActiveModel is the introduction of dependency injection as a core feature. GlueGun::DSL allows you to define dependencies that your class relies on, configure them flexibly, and even bind attributes between your class and its dependencies.
 
-### Defining Dependencies
+## Defining Dependencies
 
 Use `define_dependency` to declare a dependency:
 
@@ -107,11 +164,8 @@ define_dependency :cache do |dependency|
   dependency.set_class 'MemoryCache'
   dependency.attribute :size, default: 1024
 end
-```
 
-Usage:
-
-```ruby
+# Usage:
 instance = MyClass.new
 instance.cache.size # => 1024
 ```
@@ -136,19 +190,16 @@ define_dependency :database do |dependency|
 
   dependency.default_option_name = :mysql
 end
-```
 
-Usage:
-
-```ruby
+# Usage:
 instance = MyClass.new(database: { mysql: { host: 'localhost' } })
-instance.database # Instance of MySQLDatabase
+instance.database # => Instance of MySQLDatabase
 
 instance = MyClass.new(database: { postgresql: { host: 'localhost' } })
-instance.database # Instance of PostgreSQLDatabase
+instance.database # => Instance of PostgreSQLDatabase
 ```
 
-### Sexy Interfaces With The `when` Block
+### Dynamic Dependency Resolution with `when`
 
 Use the `when` block to dynamically determine which dependency option to use based on input:
 
@@ -173,19 +224,16 @@ define_dependency :storage do |dependency|
     end
   end
 end
-```
 
-Usage:
-
-```ruby
+# Usage:
 instance = MyClass.new(storage: 's3://my-bucket')
-instance.storage # Instance of S3Storage
+instance.storage # => Instance of S3Storage
 
 instance = MyClass.new(storage: '/data/files')
-instance.storage # Instance of LocalStorage
+instance.storage # => Instance of LocalStorage
 ```
 
-### Attribute Binding Between Components
+## Attribute Binding Between Components
 
 Attributes can be bound between your class and its dependencies using the `source` option. This ensures that when an attribute changes in the parent class, it automatically updates in the dependency.
 
@@ -196,17 +244,12 @@ define_dependency :file_manager do |dependency|
   dependency.set_class 'FileManager'
   dependency.attribute :base_path, source: :root_path
 end
-```
 
-When `root_path` is updated, `file_manager.base_path` reflects the change:
-
-```ruby
+# Usage:
 instance = MyClass.new
 instance.root_path = '/new/root'
 instance.file_manager.base_path # => '/new/root'
 ```
-
----
 
 ## Inheritance and Overrides
 
@@ -219,20 +262,23 @@ class Dataset
   define_dependency :datasource do |dependency|
     dependency.option :s3 do |option|
       option.set_class "S3Datasource"
-      option.attribute
+      option.attribute :bucket, required: true
     end
   end
 end
 
-class SpecializedService < BaseService
+class SpecializedDataset < Dataset
   attribute :special_feature, :boolean, default: true
 
-  # Override the logger dependency with different configuration
-  logger :logger, level: 'DEBUG'
+  # Override the datasource dependency with a different configuration
+  define_dependency :datasource do |dependency|
+    dependency.option :azure do |option|
+      option.set_class "AzureDatasource"
+      option.attribute :container, required: true
+    end
+  end
 end
 ```
-
----
 
 ## Complete Examples
 
@@ -307,31 +353,9 @@ dataset = DataPipeline::Dataset.new(
 dataset.process_data
 ```
 
-## Installation
-
-Add this line to your application's Gemfile:
-
-```ruby
-gem 'glue_gun_dsl'
-```
-
-And then execute:
-
-```bash
-bundle install
-```
-
-Or install it yourself as:
-
-```bash
-gem install glue_gun_dsl
-```
-
----
-
 ## Defining Attributes
 
-GlueGun::DSL leverages `ActiveModel::Attributes` to define attributes with type casting, default values, and validations, just like you're used to.
+GlueGun::DSL leverages ActiveModel::Attributes to define attributes with type casting, default values, and validations, just like you're used to.
 
 ### Basic Usage
 
@@ -365,7 +389,7 @@ attribute :active, :boolean, default: true
 
 ### Validations
 
-Use `ActiveModel::Validations` to add validations to your attributes:
+Use ActiveModel::Validations to add validations to your attributes:
 
 ```ruby
 attribute :email, :string
@@ -388,57 +412,48 @@ def salary
 end
 ```
 
----
-
----
-
 ## Comparison with ActiveModel
 
-While `ActiveModel` provides a solid foundation for defining attributes, validations, and type casting, it lacks built-in support for dependency injection or managing complex dependencies between components.
+While ActiveModel provides a solid foundation for defining attributes, validations, and type casting, it lacks built-in support for dependency injection or managing complex dependencies between components.
 
-**Key Differences and Enhancements with GlueGun::DSL:**
+### Key Differences and Enhancements with GlueGun::DSL:
 
-- **First-Class Dependency Injection**: Easily define and configure dependencies directly within your models, making your code more modular and testable.
+- **First-Class Dependency Injection**: Easily define and configure dependencies directly within your models or Ruby objects, making your code more modular and testable.
 - **Dynamic Dependency Resolution**: Use the `when` block to select dependencies based on runtime input, providing flexibility in how dependencies are configured and used.
 - **Attribute Binding Between Components**: Synchronize attribute values between your class and its dependencies seamlessly, reducing boilerplate code and potential for errors.
-- **Enhanced DSL**: Maintain the familiar syntax and features of `ActiveModel` while gaining powerful new capabilities.
+- **Enhanced DSL**: Maintain the familiar syntax and features of ActiveModel while gaining powerful new capabilities.
+- **Compatibility with ActiveRecord and POROs**: GlueGun::DSL works seamlessly with ActiveRecord models and can be used with any Ruby object, providing flexibility based on your application's architecture.
 
-By incorporating these features, GlueGun::DSL allows you to manage complex configurations and relationships within your models more effectively than with `ActiveModel` alone.
-
----
+By incorporating these features, GlueGun::DSL allows you to manage complex configurations and relationships within your models or Ruby objects more effectively than with ActiveModel alone.
 
 ## Contributing
 
 We welcome contributions to GlueGun::DSL! To contribute:
 
-1. **Fork** the repository on GitHub.
-2. **Create** a new branch with your feature or bug fix.
-3. **Write** tests for your changes.
-4. **Submit** a pull request with a detailed explanation.
+1. **Fork the repository** on GitHub.
+2. **Create a new branch** with your feature or bug fix.
+3. **Write tests** for your changes.
+4. **Submit a pull request** with a detailed explanation.
 
 Please ensure your code follows the project's coding standards and passes all tests. To test against different versions of ActiveModel:
 
-```
+```bash
 bundle exec appraisal activemodel-6 guard
 bundle exec appraisal activemodel-7 guard
 ```
 
----
-
 ## License
 
-GlueGun::DSL is released under the [MIT License](LICENSE.txt).
+GlueGun::DSL is released under the MIT License.
 
 ---
 
-## Enjoy Using GlueGun::DSL!
+**Enjoy Using GlueGun::DSL!**
 
-With GlueGun::DSL, you can supercharge your Ruby classes by seamlessly integrating dependency injection alongside the familiar `ActiveModel` features. Whether you're building simple applications or complex systems, GlueGun::DSL provides the tools to manage your components effectively.
-
----
+With GlueGun::DSL, you can supercharge your Ruby classes by seamlessly integrating dependency injection alongside the familiar ActiveModel features. Whether you're enhancing ActiveRecord models or building simple POROs, GlueGun::DSL provides the tools to manage your components effectively.
 
 For more examples and detailed documentation, please visit our [GitHub repository](https://github.com/your_username/glue_gun_dsl).
 
----
+_Note: Replace `your_username` with your actual GitHub username and ensure the `LICENSE.txt` file is included in your repository._
 
-**Note:** Replace `your_username` with your actual GitHub username and ensure the `LICENSE.txt` file is included in your repository.
+---
