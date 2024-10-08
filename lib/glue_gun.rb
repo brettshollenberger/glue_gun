@@ -1,4 +1,5 @@
 require "active_model"
+require "active_record"
 require "active_support/concern"
 
 module GlueGun
