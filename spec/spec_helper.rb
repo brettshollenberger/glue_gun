@@ -15,12 +15,18 @@ ActiveRecord::Schema.define do
   create_table :active_record_tests do |t|
     t.string :custom_field
     t.integer :processed_field
+    t.string :unbound_field
     t.timestamps
   end
 
   create_table :active_record_dependencies do |t|
     t.string :custom_field
     t.integer :processed_field
+    t.string :unbound_field
+    t.timestamps
+  end
+
+  create_table :uh_ohs do |t|
     t.timestamps
   end
 end

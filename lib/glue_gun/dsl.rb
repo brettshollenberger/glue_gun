@@ -121,7 +121,6 @@ module GlueGun
         attribute_methods_module.class_eval do
           define_method "#{component_type}=" do |init_args|
             instance_variable_set("@#{component_type}", initialize_dependency(component_type, init_args))
-            # propagate_attribute_change(component_type, value) if initialized?
           end
         end
       end
@@ -184,6 +183,11 @@ module GlueGun
 
       # Build dependency attributes, including sourcing from parent
       dep_attributes = build_dependency_attributes(option_config, dep_attributes)
+
+      if dep_attributes.key?(:id)
+        raise ArgumentError,
+              "cannot bind attribute 'id' between #{self.class.name} and #{option_config.class_name}. ID is reserved for primary keys in Ruby on Rails"
+      end
 
       dependency_instance = instantiate_dependency(option_config, dep_attributes)
 
@@ -362,8 +366,8 @@ module GlueGun
         set_default_option_name(:default)
       end
 
-      def attribute(name, default: nil, required: false, source: nil, &block)
-        single_option.attribute(name, default: default, required: required, source: source, &block)
+      def bind_attribute(name, default: nil, required: false, source: nil, &block)
+        single_option.bind_attribute(name, default: default, required: required, source: source, &block)
       end
 
       def get_option(name)
@@ -430,7 +434,7 @@ module GlueGun
         end
       end
 
-      def attribute(name, default: nil, required: false, source: nil, &block)
+      def bind_attribute(name, default: nil, required: false, source: nil, &block)
         attr = ConfigAttr.new(name, default: default, required: required, source: source, &block)
         @attributes[name.to_sym] = attr
       end
