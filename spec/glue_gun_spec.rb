@@ -262,9 +262,9 @@ RSpec.describe GlueGun::DSL do
 
         class Example
           include GlueGun::DSL
-          dependency :dep do |dependency|
-            dependency.set_class ExampleDep
-            dependency.bind_attribute :valid
+          dependency :dep do |dep|
+            dep.set_class ExampleDep
+            dep.bind_attribute :valid
           end
         end
 
@@ -640,6 +640,106 @@ RSpec.describe GlueGun::DSL do
 
     it "raises an error for unknown attributes" do
       expect { ar_instance.unknown_attribute = "value" }.to raise_error(NoMethodError)
+    end
+  end
+
+  describe "Factories" do
+    let(:s3_attrs) do
+      {
+        s3: {
+          s3_bucket: "my-bucket",
+          s3_access_key_id: "12345",
+          s3_secret_access_key: "67890"
+        }
+      }
+    end
+    class DatasourceFactory
+      include GlueGun::DSL
+
+      dependency :datasource do |dependency|
+        dependency.option :no_op do |option|
+          option.default
+          option.set_class NoOp
+        end
+
+        dependency.option :s3 do |option|
+          option.set_class Test::Data::Datasource::S3Datasource
+          option.bind_attribute :root_dir
+          option.bind_attribute :s3_bucket, required: true
+          option.bind_attribute :s3_access_key_id, default: "12345"
+          option.bind_attribute :polars_args, required: true, default: {}
+        end
+
+        dependency.option :directory do |option|
+          option.set_class Test::Data::Datasource::FileDatasource
+          option.bind_attribute :root_dir do |value|
+            File.join(value, "bingo/bangos")
+          end
+        end
+
+        dependency.option :polars do |option|
+          option.set_class Test::Data::Datasource::PolarsDatasource
+          option.bind_attribute :complex_chain do |value|
+            "#{value} and super cool"
+          end
+        end
+
+        dependency.when do |dep|
+          case dep
+          when Polars::DataFrame
+            { option: :polars, as: :df }
+          when String
+            { option: :directory, as: :root_dir }
+          end
+        end
+      end
+
+      def initialize(attrs = {})
+        super(attrs)
+        @datasource = initialize_dependency(:datasource, attrs[:datasource])
+      end
+
+      attr_reader :datasource
+    end
+
+    # Define a new class that uses the DatasourceFactory
+    class Dataset
+      include GlueGun::DSL
+
+      dependency :datasource, DatasourceFactory
+    end
+
+    it "creates a datasource using the factory" do
+      instance = Dataset.new(datasource: s3_attrs)
+      expect(instance.datasource).to be_a(Test::Data::Datasource::S3Datasource)
+      expect(instance.datasource.s3_bucket).to eq("my-bucket")
+    end
+
+    it "uses the default option when no specific option is provided" do
+      instance = Dataset.new
+      expect(instance.datasource).to be_a(NoOp)
+    end
+
+    it "handles Polars::DataFrame correctly" do
+      df = Polars::DataFrame.new({ id: [1, 2, 3] })
+      instance = Dataset.new(datasource: df)
+      expect(instance.datasource).to be_a(Test::Data::Datasource::PolarsDatasource)
+      expect(instance.datasource.df).to eq df
+    end
+
+    it "handles string input for directory" do
+      instance = Dataset.new(datasource: "/local/path")
+      expect(instance.datasource).to be_a(Test::Data::Datasource::FileDatasource)
+      expect(instance.datasource.root_dir).to eq("/local/path")
+    end
+  end
+
+  describe "Factory classes" do
+    it "creates a datasource instance when used standalone" do
+      df = Polars::DataFrame.new({ id: [1, 2, 3] })
+      factory = DatasourceFactory.new(datasource: df)
+      expect(factory.datasource).to be_a(Test::Data::Datasource::PolarsDatasource)
+      expect(factory.datasource.df).to eq df
     end
   end
 end

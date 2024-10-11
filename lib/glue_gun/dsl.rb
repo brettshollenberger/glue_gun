@@ -28,7 +28,7 @@ module GlueGun
         prepend ClassMethods
       end
 
-      # Overriding ActiveModel.assign_attributes to ensure change propagation to dependenices
+      # Overriding ActiveModel.assign_attributes to ensure change propagation to dependencies
       def assign_attributes(new_attributes)
         super(new_attributes)
         propagate_changes if initialized?
@@ -79,6 +79,7 @@ module GlueGun
                      elsif ActiveModel.version >= Gem::Version.new("5")
                        ActiveModel::Type::Value.new
                      end
+
       # Override the attribute method to define custom setters
       def attribute(name, type = DEFAULT_TYPE, **options)
         super(name, type, **options)
@@ -97,10 +98,14 @@ module GlueGun
         end
       end
 
-      def dependency(component_type, &block)
-        dependency_builder = DependencyBuilder.new(component_type)
-        dependency_builder.instance_eval(&block)
-        dependency_definitions[component_type] = dependency_builder
+      def dependency(component_type, factory_class = nil, &block)
+        if factory_class
+          dependency_definitions[component_type] = factory_class
+        else
+          dependency_builder = DependencyBuilder.new(component_type)
+          dependency_builder.instance_eval(&block)
+          dependency_definitions[component_type] = dependency_builder
+        end
 
         # Define singleton method to allow hardcoding dependencies in subclasses
         define_singleton_method component_type do |option = nil, options = {}|
@@ -157,16 +162,24 @@ module GlueGun
     end
 
     def initialize_dependencies(attributes)
-      self.class.dependency_definitions.each do |component_type, _|
+      self.class.dependency_definitions.each do |component_type, definition|
         value = attributes[component_type] || self.class.hardcoded_dependencies[component_type]
-        instance_variable_set("@#{component_type}", initialize_dependency(component_type, value))
+        instance_variable_set("@#{component_type}", initialize_dependency(component_type, value, definition))
       end
     end
 
-    def initialize_dependency(component_type, init_args = {})
+    def initialize_dependency(component_type, init_args = {}, definition = nil)
+      definition ||= self.class.dependency_definitions[component_type]
+
+      if definition.is_a?(Class) && definition.include?(GlueGun::DSL)
+        # If the definition is a factory class, use it to create the dependency
+        factory_instance = definition.new
+        return factory_instance.send(:initialize_dependency, component_type, init_args)
+      end
+
       return init_args if dependency_injected?(component_type, init_args)
 
-      dependency_builder = self.class.dependency_definitions[component_type]
+      dependency_builder = definition
 
       if init_args && init_args.is_a?(Hash) && init_args.key?(:option_name)
         option_name = init_args[:option_name]
