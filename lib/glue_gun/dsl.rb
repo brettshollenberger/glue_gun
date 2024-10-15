@@ -61,7 +61,10 @@ module GlueGun
           end
         end
 
-        normal_attributes.reverse_merge!(root_dir: detect_root_dir) if attribute_definitions.keys.include?(:root_dir)
+        if attribute_definitions.keys.include?(:root_dir) && attribute_definitions.dig(:root_dir, :options,
+                                                                                       :default).nil?
+          normal_attributes.reverse_merge!(root_dir: detect_root_dir)
+        end
 
         # Call super to allow ActiveModel to assign attributes
         super(normal_attributes)
@@ -98,13 +101,19 @@ module GlueGun
         end
       end
 
-      def dependency(component_type, factory_class = nil, &block)
-        if factory_class
-          dependency_definitions[component_type] = factory_class
+      def dependency(component_type, options = {}, factory_class = nil, &block)
+        if options.is_a?(Class)
+          factory_class = options
+          options = {}
+        end
+        is_array = options[:array] || false
+
+        if factory_class.present?
+          dependency_definitions[component_type] = { factory_class: factory_class, array: is_array }
         else
           dependency_builder = DependencyBuilder.new(component_type)
           dependency_builder.instance_eval(&block)
-          dependency_definitions[component_type] = dependency_builder
+          dependency_definitions[component_type] = { builder: dependency_builder, array: is_array }
         end
 
         # Define singleton method to allow hardcoding dependencies in subclasses
@@ -170,16 +179,49 @@ module GlueGun
 
     def initialize_dependency(component_type, init_args = {}, definition = nil)
       definition ||= self.class.dependency_definitions[component_type]
+      is_array = definition[:array]
 
-      if definition.is_a?(Class) && definition.include?(GlueGun::DSL)
-        # If the definition is a factory class, use it to create the dependency
-        factory_instance = definition.new
-        return factory_instance.send(:initialize_dependency, component_type, init_args)
+      if is_array
+        dep = []
+        config = []
+        Array(init_args).each do |args|
+          d, c = initialize_single_dependency(component_type, args, definition)
+          dep.push(d)
+          config.push(c)
+        end
+      else
+        dep, config = initialize_single_dependency(component_type, init_args, definition)
       end
 
-      return init_args if dependency_injected?(component_type, init_args)
+      dependencies[component_type] = {
+        instance: dep,
+        option: config
+      }
 
-      dependency_builder = definition
+      dep
+    end
+
+    def initialize_factory_dependency(component_type, init_args, definition)
+      factory_instance = definition[:factory_class].new
+
+      # Pass the parent instance to the factory
+      factory_instance.instance_variable_set(:@parent, self)
+
+      dep_defs = factory_instance.dependency_definitions
+      definition = dep_defs[dep_defs.keys.first]
+
+      if dep_defs.key?(component_type)
+        factory_instance.send(:initialize_single_dependency, component_type, init_args, definition)
+      elsif dep_defs.keys.one?
+        factory_instance.send(:initialize_single_dependency, dep_defs.keys.first, init_args, definition)
+      else
+        raise ArgumentError,
+              "Don't know how to use Factory #{factory_instance.class} to build dependency '#{component_type}'"
+      end
+    end
+
+    def initialize_builder_dependency(component_type, init_args, definition)
+      dependency_builder = definition[:builder]
 
       if init_args && init_args.is_a?(Hash) && init_args.key?(:option_name)
         option_name = init_args[:option_name]
@@ -192,30 +234,24 @@ module GlueGun
 
       raise ArgumentError, "Unknown #{component_type} option '#{option_name}'" unless option_config
 
-      dep_attributes = init_args.is_a?(Hash) ? init_args : {}
+      [instantiate_dependency(option_config, init_args), option_config]
+    end
 
-      # Build dependency attributes, including sourcing from parent
-      dep_attributes = build_dependency_attributes(option_config, dep_attributes)
-
-      if dep_attributes.key?(:id)
-        raise ArgumentError,
-              "cannot bind attribute 'id' between #{self.class.name} and #{option_config.class_name}. ID is reserved for primary keys in Ruby on Rails"
+    def initialize_single_dependency(component_type, init_args, definition)
+      if dependency_injected?(component_type, init_args)
+        dep = init_args
+        option_config = injected_dependency(component_type, init_args)
+      elsif definition[:factory_class]
+        dep, option_config = initialize_factory_dependency(component_type, init_args, definition)
+      else
+        dep, option_config = initialize_builder_dependency(component_type, init_args, definition)
       end
 
-      dependency_instance = instantiate_dependency(option_config, dep_attributes)
-
-      # Keep track of dependencies for attribute binding
-      dependencies[component_type] = {
-        instance: dependency_instance,
-        option: option_config
-      }
-
-      dependency_instance
+      [dep, option_config]
     end
 
     def build_dependency_attributes(option_config, dep_attributes)
       option_config.attributes.each do |attr_name, attr_config|
-        # If the attribute is already provided, use it
         if dep_attributes.key?(attr_name)
           value = dep_attributes[attr_name]
         else
@@ -223,6 +259,8 @@ module GlueGun
                     send(attr_config.source)
                   elsif respond_to?(attr_name)
                     send(attr_name)
+                  elsif instance_variable_defined?(:@parent) && @parent.respond_to?(attr_name)
+                    @parent.send(attr_name)
                   else
                     attr_config.default
                   end
@@ -235,7 +273,7 @@ module GlueGun
     end
 
     def determine_option_name(component_type, init_args)
-      dependency_builder = self.class.dependency_definitions[component_type]
+      dependency_builder = self.class.dependency_definitions[component_type][:builder]
 
       option_name = nil
 
@@ -269,11 +307,18 @@ module GlueGun
       [option_name, init_args]
     end
 
-    def instantiate_dependency(option_config, dep_attributes)
+    def instantiate_dependency(option_config, init_args)
+      dep_attributes = init_args.is_a?(Hash) ? init_args : {}
+
+      # Build dependency attributes, including sourcing from parent
+      dep_attributes = build_dependency_attributes(option_config, dep_attributes)
+
+      if dep_attributes.key?(:id)
+        raise ArgumentError,
+              "cannot bind attribute 'id' between #{self.class.name} and #{option_config.class_name}. ID is reserved for primary keys in Ruby on Rails"
+      end
       dependency_class = option_config.class_name
-      dependency_instance = dependency_class.new(dep_attributes)
-      dependency_instance.validate! if false # dependency_instance.respond_to?(:validate!)
-      dependency_instance
+      dependency_class.new(dep_attributes)
     end
 
     def propagate_changes
@@ -287,31 +332,56 @@ module GlueGun
     end
 
     def propagate_attribute_change(attr_name, value)
-      self.class.dependency_definitions.each do |component_type, _dependency_builder|
+      self.class.dependency_definitions.each do |component_type, _builder|
         dependency_instance = send(component_type)
-        option_config = dependencies.dig(component_type, :option)
-        next unless option_config
 
-        bound_attrs = option_config.attributes.select do |_, attr_config|
-          (attr_config.source == attr_name.to_sym) || (attr_config.name == attr_name.to_sym)
-        end
+        if dependency_instance.is_a?(Array)
+          option_config = dependencies.dig(component_type, :option)
 
-        bound_attrs.each do |dep_attr_name, config_attr|
-          block = config_attr.block.present? ? config_attr.block : proc { |att| att }
-          if dependency_instance.respond_to?("#{dep_attr_name}=")
-            dependency_instance.send("#{dep_attr_name}=",
-                                     block.call(value))
+          dependency_instance.zip(option_config).each do |dep, opt|
+            propagate_attribute_to_instance(attr_name, value, dep, opt)
           end
+        else
+          option_config = dependencies.dig(component_type, :option)
+          next unless option_config
+
+          propagate_attribute_to_instance(attr_name, value, dependency_instance, option_config)
         end
       end
     end
 
-    def dependency_injected?(component_type, value)
-      dependency_builder = self.class.dependency_definitions[component_type]
-      dependency_builder.option_configs.values.any? do |option|
+    def propagate_attribute_to_instance(attr_name, value, dependency_instance, option_config)
+      bound_attrs = option_config.attributes.select do |_, attr_config|
+        (attr_config.source == attr_name.to_sym) || (attr_config.name == attr_name.to_sym)
+      end
+
+      bound_attrs.each do |dep_attr_name, config_attr|
+        block = config_attr.block.present? ? config_attr.block : proc { |att| att }
+        if dependency_instance.respond_to?("#{dep_attr_name}=")
+          dependency_instance.send("#{dep_attr_name}=",
+                                   block.call(value))
+        end
+      end
+    end
+
+    def injected_dependency(component_type, value)
+      definition = self.class.dependency_definitions[component_type]
+      builder = definition[:builder]
+      factory = definition[:factory_class]
+
+      option_configs = if builder
+                         builder.option_configs
+                       else
+                         factory.dependency_definitions.values.first.values.first.option_configs
+                       end
+      option_configs.values.select do |option|
         option_class = option.class_name
         value.is_a?(option_class)
       end
+    end
+
+    def dependency_injected?(component_type, value)
+      injected_dependency(component_type, value).any?
     end
 
     def dependencies

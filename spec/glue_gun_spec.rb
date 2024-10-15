@@ -14,158 +14,157 @@ class Pathname
 end
 
 RSpec.describe GlueGun::DSL do
-  # Mocking necessary classes for the tests
-  class NoOp
-    include ActiveModel::Model
-    include ActiveModel::Attributes
-  end
+  describe "ActiveModel integration" do
+    # Mocking necessary classes for the tests
+    class NoOp
+      include ActiveModel::Model
+      include ActiveModel::Attributes
+    end
 
-  module Test
-    module Data
-      class PreprocessingSteps
-        include GlueGun::DSL
-
-        attribute :preprocessing_steps, :hash
-        attribute :directory, :string
-        attribute :complex_chain, :string
-        attribute :custom_field, :string
-      end
-
-      class SyncedDir
-        include GlueGun::DSL
-        attribute :root_dir, :string
-        attribute :s3_bucket, :string
-      end
-
-      module Datasource
-        class S3Datasource
+    module Test
+      module Data
+        class PreprocessingSteps
           include GlueGun::DSL
 
-          attribute :s3_bucket, :string
-          attribute :s3_prefix, :string
+          attribute :preprocessing_steps, :hash
+          attribute :directory, :string
+          attribute :complex_chain, :string
+          attribute :custom_field, :string
+        end
+
+        class SyncedDir
+          include GlueGun::DSL
           attribute :root_dir, :string
-          attribute :s3_access_key_id, :string
-          attribute :s3_secret_access_key, :string
-          attribute :polars_args, :hash, default: {}
+          attribute :s3_bucket, :string
+        end
 
-          validates :s3_bucket, :s3_access_key_id, :s3_secret_access_key, presence: true
+        module Datasource
+          class S3Datasource
+            include GlueGun::DSL
 
-          dependency :synced_directory do |dep|
-            dep.set_class Test::Data::SyncedDir
-            dep.bind_attribute :root_dir do |value|
-              Pathname.new(value).append("secrets").to_s
+            attribute :s3_bucket, :string
+            attribute :s3_prefix, :string
+            attribute :root_dir, :string
+            attribute :s3_access_key_id, :string
+            attribute :s3_secret_access_key, :string
+            attribute :polars_args, :hash, default: {}
+
+            validates :s3_bucket, :s3_access_key_id, :s3_secret_access_key, presence: true
+
+            dependency :synced_directory do |dep|
+              dep.set_class Test::Data::SyncedDir
+              dep.bind_attribute :root_dir do |value|
+                Pathname.new(value).append("secrets").to_s
+              end
+              dep.bind_attribute :s3_bucket
             end
-            dep.bind_attribute :s3_bucket
+          end
+
+          class FileDatasource
+            include ActiveModel::Model
+            include ActiveModel::Attributes
+            attribute :root_dir, :string
+
+            validates :root_dir, presence: true
+          end
+
+          class PolarsDatasource
+            include GlueGun::DSL
+            attribute :df
+            attribute :complex_chain
+            validates :df, presence: true
+          end
+        end
+      end
+    end
+
+    # Define SomethingCool class using the new GlueGun::DSL
+    class SomethingCool
+      include GlueGun::DSL
+
+      attribute :id, :string, default: "Default Name"
+      attribute :age, :integer
+      validates :age, presence: true
+      attribute :root_dir, :string
+
+      attribute :complex_chain, :string
+      def complex_chain=(value)
+        super("#{value} is cool")
+      end
+
+      attribute :processed_attr, :integer, default: 0
+      attribute :polars_args, :hash, default: {}
+
+      def processed_attr=(value)
+        super(value.to_i * 2)
+      end
+
+      attribute :preprocessing_steps, :hash, default: {}
+
+      dependency :preprocessor do |dependency|
+        dependency.set_class Test::Data::PreprocessingSteps
+        dependency.bind_attribute :directory, source: :root_dir
+        dependency.bind_attribute :complex_chain do |value|
+          "#{value} and rocks my socks"
+        end
+      end
+
+      dependency :datasource do |dependency|
+        dependency.option :no_op do |option|
+          option.default
+          option.set_class NoOp
+        end
+
+        dependency.option :s3 do |option|
+          option.set_class Test::Data::Datasource::S3Datasource
+          option.bind_attribute :root_dir
+          option.bind_attribute :s3_bucket, required: true
+          option.bind_attribute :s3_access_key_id, default: "12345"
+          option.bind_attribute :polars_args, required: true, default: {}
+        end
+
+        dependency.option :directory do |option|
+          option.set_class Test::Data::Datasource::FileDatasource
+          option.bind_attribute :root_dir do |value|
+            File.join(value, "bingo/bangos")
           end
         end
 
-        class FileDatasource
-          include ActiveModel::Model
-          include ActiveModel::Attributes
-          attribute :root_dir, :string
-
-          validates :root_dir, presence: true
+        dependency.option :polars do |option|
+          option.set_class Test::Data::Datasource::PolarsDatasource
+          option.bind_attribute :complex_chain do |value|
+            "#{value} and super cool"
+          end
         end
 
-        class PolarsDatasource
-          include GlueGun::DSL
-          attribute :df
-          attribute :complex_chain
-          validates :df, presence: true
-        end
-      end
-    end
-  end
-
-  # Define SomethingCool class using the new GlueGun::DSL
-  class SomethingCool
-    include GlueGun::DSL
-
-    attribute :id, :string, default: "Default Name"
-    attribute :age, :integer
-    validates :age, presence: true
-    attribute :root_dir, :string
-
-    attribute :complex_chain, :string
-    def complex_chain=(value)
-      super("#{value} is cool")
-    end
-
-    attribute :processed_attr, :integer, default: 0
-    attribute :polars_args, :hash, default: {}
-
-    def processed_attr=(value)
-      super(value.to_i * 2)
-    end
-
-    attribute :preprocessing_steps, :hash, default: {}
-
-    dependency :preprocessor do |dependency|
-      dependency.set_class Test::Data::PreprocessingSteps
-      dependency.bind_attribute :directory, source: :root_dir
-      dependency.bind_attribute :complex_chain do |value|
-        "#{value} and rocks my socks"
-      end
-    end
-
-    dependency :datasource do |dependency|
-      dependency.option :no_op do |option|
-        option.default
-        option.set_class NoOp
-      end
-
-      dependency.option :s3 do |option|
-        option.set_class Test::Data::Datasource::S3Datasource
-        option.bind_attribute :root_dir
-        option.bind_attribute :s3_bucket, required: true
-        option.bind_attribute :s3_access_key_id, default: "12345"
-        option.bind_attribute :polars_args, required: true, default: {}
-      end
-
-      dependency.option :directory do |option|
-        option.set_class Test::Data::Datasource::FileDatasource
-        option.bind_attribute :root_dir do |value|
-          File.join(value, "bingo/bangos")
-        end
-      end
-
-      dependency.option :polars do |option|
-        option.set_class Test::Data::Datasource::PolarsDatasource
-        option.bind_attribute :complex_chain do |value|
-          "#{value} and super cool"
-        end
-      end
-
-      dependency.when do |dep|
-        case dep
-        when Polars::DataFrame
-          { option: :polars, as: :df }
-        when String
-          { option: :directory, as: :root_dir }
+        dependency.when do |dep|
+          case dep
+          when Polars::DataFrame
+            { option: :polars, as: :df }
+          when String
+            { option: :directory, as: :root_dir }
+          end
         end
       end
     end
-  end
 
-  class ChildClass < SomethingCool
-    datasource :s3, s3_bucket: "my-bucket", s3_access_key_id: "12345", s3_secret_access_key: "67890"
-    attribute :child_attr, :string, default: "Child Attr"
-  end
+    class ChildClass < SomethingCool
+      datasource :s3, s3_bucket: "my-bucket", s3_access_key_id: "12345", s3_secret_access_key: "67890"
+      attribute :child_attr, :string, default: "Child Attr"
+    end
 
-  let(:s3_attrs) do
-    {
-      s3: {
-        s3_bucket: "my-bucket",
-        s3_access_key_id: "12345",
-        s3_secret_access_key: "67890"
+    let(:s3_attrs) do
+      {
+        s3: {
+          s3_bucket: "my-bucket",
+          s3_access_key_id: "12345",
+          s3_secret_access_key: "67890"
+        }
       }
-    }
-  end
+    end
 
-  let(:test_class) { SomethingCool }
-  let(:child_class) { ChildClass }
-
-  describe "ActiveModel integration" do
+    let(:test_class) { SomethingCool }
+    let(:child_class) { ChildClass }
     describe "Attributes" do
       it "defines an attribute with a default on dependencies" do
         polars_args = { dtypes: { a: "float" } }
@@ -306,6 +305,7 @@ RSpec.describe GlueGun::DSL do
         # Block gets called to append whenver value gets updated!
         expect(instance.datasource.synced_directory.root_dir).to eq PROJECT_ROOT.join("spec").join("secrets").to_s
 
+        puts "Changing value of project root!"
         instance.root_dir = PROJECT_ROOT.to_s
         expect(instance.datasource.root_dir).to eq PROJECT_ROOT.to_s
 
@@ -472,82 +472,82 @@ RSpec.describe GlueGun::DSL do
   end
 
   # Add a new ActiveRecord-based test class
-  class ActiveRecordDependency < ActiveRecord::Base
-    include GlueGun::DSL
-    validates :custom_field, presence: true
-    validates :processed_field, presence: true
-  end
-
-  class ActiveRecordTest < ActiveRecord::Base
-    include GlueGun::DSL
-
-    attribute :root_dir, :string
-
-    validates :custom_field, presence: true
-
-    def processed_field=(value)
-      super(value.to_i * 3)
-    end
-
-    dependency :ar_dependency do |dependency|
-      dependency.set_class ActiveRecordDependency
-      dependency.bind_attribute :custom_field
-      dependency.bind_attribute :processed_field
-    end
-
-    dependency :preprocessor do |dependency|
-      dependency.set_class Test::Data::PreprocessingSteps
-      dependency.bind_attribute :directory, source: :root_dir
-      dependency.bind_attribute :custom_field
-
-      dependency.when do |dep|
-        case dep
-        when String
-          { option: :default, as: :directory }
-        end
-      end
-    end
-
-    dependency :datasource do |dependency|
-      dependency.option :no_op do |option|
-        option.default
-        option.set_class NoOp
-      end
-
-      dependency.option :s3 do |option|
-        option.set_class Test::Data::Datasource::S3Datasource
-        option.bind_attribute :root_dir
-        option.bind_attribute :s3_bucket, required: true
-        option.bind_attribute :s3_access_key_id, required: true
-        option.bind_attribute :polars_args, required: true, default: {}
-      end
-
-      dependency.option :directory do |option|
-        option.set_class Test::Data::Datasource::FileDatasource
-        option.bind_attribute :root_dir do |value|
-          File.join(value, "bingo/bangos")
-        end
-      end
-
-      dependency.option :polars do |option|
-        option.set_class Test::Data::Datasource::PolarsDatasource
-        option.bind_attribute :complex_chain do |value|
-          "#{value} and super cool"
-        end
-      end
-
-      dependency.when do |dep|
-        case dep
-        when Polars::DataFrame
-          { option: :polars, as: :df }
-        when String
-          { option: :directory, as: :root_dir }
-        end
-      end
-    end
-  end
-
   describe "ActiveRecord Integration" do
+    class ActiveRecordDependency < ActiveRecord::Base
+      include GlueGun::DSL
+      validates :custom_field, presence: true
+      validates :processed_field, presence: true
+    end
+
+    class ActiveRecordTest < ActiveRecord::Base
+      include GlueGun::DSL
+
+      attribute :root_dir, :string
+
+      validates :custom_field, presence: true
+
+      def processed_field=(value)
+        super(value.to_i * 3)
+      end
+
+      dependency :ar_dependency do |dependency|
+        dependency.set_class ActiveRecordDependency
+        dependency.bind_attribute :custom_field
+        dependency.bind_attribute :processed_field
+      end
+
+      dependency :preprocessor do |dependency|
+        dependency.set_class Test::Data::PreprocessingSteps
+        dependency.bind_attribute :directory, source: :root_dir
+        dependency.bind_attribute :custom_field
+
+        dependency.when do |dep|
+          case dep
+          when String
+            { option: :default, as: :directory }
+          end
+        end
+      end
+
+      dependency :datasource do |dependency|
+        dependency.option :no_op do |option|
+          option.default
+          option.set_class NoOp
+        end
+
+        dependency.option :s3 do |option|
+          option.set_class Test::Data::Datasource::S3Datasource
+          option.bind_attribute :root_dir
+          option.bind_attribute :s3_bucket, required: true
+          option.bind_attribute :s3_access_key_id, required: true
+          option.bind_attribute :polars_args, required: true, default: {}
+        end
+
+        dependency.option :directory do |option|
+          option.set_class Test::Data::Datasource::FileDatasource
+          option.bind_attribute :root_dir do |value|
+            File.join(value, "bingo/bangos")
+          end
+        end
+
+        dependency.option :polars do |option|
+          option.set_class Test::Data::Datasource::PolarsDatasource
+          option.bind_attribute :complex_chain do |value|
+            "#{value} and super cool"
+          end
+        end
+
+        dependency.when do |dep|
+          case dep
+          when Polars::DataFrame
+            { option: :polars, as: :df }
+          when String
+            { option: :directory, as: :root_dir }
+          end
+        end
+      end
+    end
+
     let(:ar_instance) { ActiveRecordTest.new(custom_field: "test_value") }
 
     it "defines attributes on an ActiveRecord model" do
@@ -693,13 +693,6 @@ RSpec.describe GlueGun::DSL do
           end
         end
       end
-
-      def initialize(attrs = {})
-        super(attrs)
-        @datasource = initialize_dependency(:datasource, attrs[:datasource])
-      end
-
-      attr_reader :datasource
     end
 
     # Define a new class that uses the DatasourceFactory
@@ -732,6 +725,22 @@ RSpec.describe GlueGun::DSL do
       expect(instance.datasource).to be_a(Test::Data::Datasource::FileDatasource)
       expect(instance.datasource.root_dir).to eq("/local/path")
     end
+
+    it "binds attributes from parent to child via factory" do
+      class ParentWithFactory
+        include GlueGun::DSL
+        attribute :root_dir, :string, default: "/default/path"
+        dependency :child, DatasourceFactory
+      end
+
+      instance = ParentWithFactory.new(child: { s3: { s3_bucket: "test-bucket" } })
+      expect(instance.child).to be_a(Test::Data::Datasource::S3Datasource)
+      expect(instance.child.root_dir).to eq("/default/path")
+      expect(instance.child.s3_bucket).to eq("test-bucket")
+
+      instance = ParentWithFactory.new(root_dir: "/custom/path", child: { s3: { s3_bucket: "test-bucket" } })
+      expect(instance.child.root_dir).to eq("/custom/path")
+    end
   end
 
   describe "Factory classes" do
@@ -740,6 +749,98 @@ RSpec.describe GlueGun::DSL do
       factory = DatasourceFactory.new(datasource: df)
       expect(factory.datasource).to be_a(Test::Data::Datasource::PolarsDatasource)
       expect(factory.datasource.df).to eq df
+    end
+  end
+
+  describe "Array of Dependencies" do
+    class DatasourceFactory
+      include GlueGun::DSL
+
+      dependency :datasource do |dependency|
+        dependency.option :no_op do |option|
+          option.default
+          option.set_class NoOp
+        end
+
+        dependency.option :s3 do |option|
+          option.set_class Test::Data::Datasource::S3Datasource
+          option.bind_attribute :root_dir
+          option.bind_attribute :s3_bucket, required: true
+          option.bind_attribute :s3_access_key_id, default: "12345"
+          option.bind_attribute :polars_args, required: true, default: {}
+        end
+
+        dependency.option :directory do |option|
+          option.set_class Test::Data::Datasource::FileDatasource
+          option.bind_attribute :root_dir do |value|
+            File.join(value, "bingo/bangos")
+          end
+        end
+
+        dependency.option :polars do |option|
+          option.set_class Test::Data::Datasource::PolarsDatasource
+          option.bind_attribute :complex_chain do |value|
+            "#{value} and super cool"
+          end
+        end
+
+        dependency.when do |dep|
+          case dep
+          when Polars::DataFrame
+            { option: :polars, as: :df }
+          when String
+            { option: :directory, as: :root_dir }
+          end
+        end
+      end
+    end
+
+    class DatasetWithArrayDependencies
+      include GlueGun::DSL
+
+      attribute :root_dir, :string
+
+      dependency :datasources, { array: true }, DatasourceFactory
+    end
+
+    it "initializes an array of dependencies" do
+      df1 = Polars::DataFrame.new({ id: [1, 2, 3] })
+      instance = DatasetWithArrayDependencies.new(datasources: [df1, { s3: { s3_bucket: "xyz" } }])
+
+      expect(instance.datasources.size).to eq(2)
+      expect(instance.datasources[0]).to be_a(Test::Data::Datasource::PolarsDatasource)
+      expect(instance.datasources[0].df).to eq(df1)
+      expect(instance.datasources[1]).to be_a(Test::Data::Datasource::S3Datasource)
+      expect(instance.datasources[1].s3_bucket).to eq("xyz")
+    end
+
+    it "binds attributes to all dependencies in array" do
+      instance = DatasetWithArrayDependencies.new(datasources: [
+                                                    { s3: { s3_bucket: "abc" } },
+                                                    { s3: { s3_bucket: "xyz" } }
+                                                  ])
+
+      expect(instance.datasources.first.root_dir).to eq instance.root_dir
+      expect(instance.datasources.last.root_dir).to eq instance.root_dir
+
+      instance.root_dir = PROJECT_ROOT
+      expect(instance.datasources.first.root_dir).to eq PROJECT_ROOT.to_s
+      expect(instance.datasources.last.root_dir).to eq PROJECT_ROOT.to_s
+
+      instance.root_dir = "/Users/me"
+      expect(instance.datasources.first.root_dir).to eq "/Users/me"
+      expect(instance.datasources.last.root_dir).to eq "/Users/me"
+    end
+
+    it "handles mixed types in the array" do
+      df = Polars::DataFrame.new({ id: [1, 2, 3] })
+      instance = DatasetWithArrayDependencies.new(datasources: [{ s3: { s3_bucket: "abc" } }, df])
+
+      expect(instance.datasources.size).to eq(2)
+      expect(instance.datasources[0]).to be_a(Test::Data::Datasource::S3Datasource)
+      expect(instance.datasources[0].s3_bucket).to eq("abc")
+      expect(instance.datasources[1]).to be_a(Test::Data::Datasource::PolarsDatasource)
+      expect(instance.datasources[1].df).to eq(df)
     end
   end
 end
