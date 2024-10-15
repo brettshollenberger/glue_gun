@@ -61,7 +61,10 @@ module GlueGun
           end
         end
 
-        normal_attributes.reverse_merge!(root_dir: detect_root_dir) if attribute_definitions.keys.include?(:root_dir)
+        if attribute_definitions.keys.include?(:root_dir) && attribute_definitions.dig(:root_dir, :options,
+                                                                                       :default).nil?
+          normal_attributes.reverse_merge!(root_dir: detect_root_dir)
+        end
 
         # Call super to allow ActiveModel to assign attributes
         super(normal_attributes)
@@ -200,11 +203,17 @@ module GlueGun
 
     def initialize_factory_dependency(component_type, init_args, definition)
       factory_instance = definition[:factory_class].new
+
+      # Pass the parent instance to the factory
+      factory_instance.instance_variable_set(:@parent, self)
+
       dep_defs = factory_instance.dependency_definitions
+      definition = dep_defs[dep_defs.keys.first]
+
       if dep_defs.key?(component_type)
-        factory_instance.send(:initialize_dependency, component_type, init_args)
+        factory_instance.send(:initialize_single_dependency, component_type, init_args, definition)
       elsif dep_defs.keys.one?
-        factory_instance.send(:initialize_dependency, dep_defs.keys.first, init_args)
+        factory_instance.send(:initialize_single_dependency, dep_defs.keys.first, init_args, definition)
       else
         raise ArgumentError,
               "Don't know how to use Factory #{factory_instance.class} to build dependency '#{component_type}'"
@@ -243,7 +252,6 @@ module GlueGun
 
     def build_dependency_attributes(option_config, dep_attributes)
       option_config.attributes.each do |attr_name, attr_config|
-        # If the attribute is already provided, use it
         if dep_attributes.key?(attr_name)
           value = dep_attributes[attr_name]
         else
@@ -251,6 +259,8 @@ module GlueGun
                     send(attr_config.source)
                   elsif respond_to?(attr_name)
                     send(attr_name)
+                  elsif instance_variable_defined?(:@parent) && @parent.respond_to?(attr_name)
+                    @parent.send(attr_name)
                   else
                     attr_config.default
                   end
@@ -324,19 +334,32 @@ module GlueGun
     def propagate_attribute_change(attr_name, value)
       self.class.dependency_definitions.each do |component_type, _builder|
         dependency_instance = send(component_type)
-        option_config = dependencies.dig(component_type, :option)
-        next unless option_config
 
-        bound_attrs = option_config.attributes.select do |_, attr_config|
-          (attr_config.source == attr_name.to_sym) || (attr_config.name == attr_name.to_sym)
-        end
+        if dependency_instance.is_a?(Array)
+          option_config = dependencies.dig(component_type, :option)
 
-        bound_attrs.each do |dep_attr_name, config_attr|
-          block = config_attr.block.present? ? config_attr.block : proc { |att| att }
-          if dependency_instance.respond_to?("#{dep_attr_name}=")
-            dependency_instance.send("#{dep_attr_name}=",
-                                     block.call(value))
+          dependency_instance.zip(option_config).each do |dep, opt|
+            propagate_attribute_to_instance(attr_name, value, dep, opt)
           end
+        else
+          option_config = dependencies.dig(component_type, :option)
+          next unless option_config
+
+          propagate_attribute_to_instance(attr_name, value, dependency_instance, option_config)
+        end
+      end
+    end
+
+    def propagate_attribute_to_instance(attr_name, value, dependency_instance, option_config)
+      bound_attrs = option_config.attributes.select do |_, attr_config|
+        (attr_config.source == attr_name.to_sym) || (attr_config.name == attr_name.to_sym)
+      end
+
+      bound_attrs.each do |dep_attr_name, config_attr|
+        block = config_attr.block.present? ? config_attr.block : proc { |att| att }
+        if dependency_instance.respond_to?("#{dep_attr_name}=")
+          dependency_instance.send("#{dep_attr_name}=",
+                                   block.call(value))
         end
       end
     end

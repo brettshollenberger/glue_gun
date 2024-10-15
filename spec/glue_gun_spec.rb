@@ -725,6 +725,22 @@ RSpec.describe GlueGun::DSL do
       expect(instance.datasource).to be_a(Test::Data::Datasource::FileDatasource)
       expect(instance.datasource.root_dir).to eq("/local/path")
     end
+
+    it "binds attributes from parent to child via factory" do
+      class ParentWithFactory
+        include GlueGun::DSL
+        attribute :root_dir, :string, default: "/default/path"
+        dependency :child, DatasourceFactory
+      end
+
+      instance = ParentWithFactory.new(child: { s3: { s3_bucket: "test-bucket" } })
+      expect(instance.child).to be_a(Test::Data::Datasource::S3Datasource)
+      expect(instance.child.root_dir).to eq("/default/path")
+      expect(instance.child.s3_bucket).to eq("test-bucket")
+
+      instance = ParentWithFactory.new(root_dir: "/custom/path", child: { s3: { s3_bucket: "test-bucket" } })
+      expect(instance.child.root_dir).to eq("/custom/path")
+    end
   end
 
   describe "Factory classes" do
@@ -798,13 +814,22 @@ RSpec.describe GlueGun::DSL do
       expect(instance.datasources[1].s3_bucket).to eq("xyz")
     end
 
-    it "binds attributes to all dependencies in array", :focus do
+    it "binds attributes to all dependencies in array" do
       instance = DatasetWithArrayDependencies.new(datasources: [
                                                     { s3: { s3_bucket: "abc" } },
                                                     { s3: { s3_bucket: "xyz" } }
                                                   ])
 
       expect(instance.datasources.first.root_dir).to eq instance.root_dir
+      expect(instance.datasources.last.root_dir).to eq instance.root_dir
+
+      instance.root_dir = PROJECT_ROOT
+      expect(instance.datasources.first.root_dir).to eq PROJECT_ROOT.to_s
+      expect(instance.datasources.last.root_dir).to eq PROJECT_ROOT.to_s
+
+      instance.root_dir = "/Users/me"
+      expect(instance.datasources.first.root_dir).to eq "/Users/me"
+      expect(instance.datasources.last.root_dir).to eq "/Users/me"
     end
 
     it "handles mixed types in the array" do
