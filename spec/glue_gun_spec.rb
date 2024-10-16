@@ -595,6 +595,15 @@ RSpec.describe GlueGun::DSL do
         ar_instance.root_dir = "/etc"
         expect(ar_instance.preprocessor.directory).to eq "/etc"
       end
+
+      it "propagates bound attributes when dependency-injected post-hoc" do
+        ar_instance.preprocessor = Test::Data::PreprocessingSteps.new({ custom_field: "burger king" })
+        expect(ar_instance.preprocessor.custom_field).to eq "burger king"
+        expect(ar_instance.preprocessor.directory).to be_nil # DOES NOT PROPAGATE
+
+        ar_instance.root_dir = "/etc" # But now will
+        expect(ar_instance.preprocessor.directory).to eq "/etc"
+      end
     end
 
     it "uses the when block for dependency options" do
@@ -951,6 +960,91 @@ RSpec.describe GlueGun::DSL do
       expect(instance.datasources[:source2]).to be_a(Test::Data::Datasource::FileDatasource)
       expect(instance.datasources[:source1].s3_bucket).to eq("abc")
       expect(instance.datasources[:source2].root_dir).to eq("/path/to/dir")
+    end
+  end
+
+  describe "Flexible dependencies" do
+    class FlexibleDataset
+      include GlueGun::DSL
+
+      attribute :root_dir, :string
+      dependency :datasource, DatasourceFactory
+    end
+
+    let(:s3_attrs) do
+      { s3: { s3_bucket: "my-bucket", s3_secret_access_key: "secret" } }
+    end
+
+    describe "Standalone dependency" do
+      it "handles a single dependency" do
+        instance = FlexibleDataset.new(datasource: s3_attrs)
+        expect(instance.datasource).to be_a(Test::Data::Datasource::S3Datasource)
+        expect(instance.datasource.s3_bucket).to eq("my-bucket")
+      end
+
+      it "handles dependency injection" do
+        df = Polars::DataFrame.new({ id: [1, 2, 3] })
+        instance = FlexibleDataset.new(datasource: df)
+        expect(instance.datasource).to be_a(Test::Data::Datasource::PolarsDatasource)
+        expect(instance.datasource.df).to eq(df)
+      end
+
+      it "uses the default option when no specific option is provided" do
+        instance = FlexibleDataset.new
+        expect(instance.datasource).to be_a(NoOp)
+      end
+    end
+
+    describe "Array of dependencies" do
+      it "handles an array of dependencies" do
+        df = Polars::DataFrame.new({ id: [1, 2, 3] })
+        instance = FlexibleDataset.new(datasource: [s3_attrs, df, "/local/path"])
+
+        expect(instance.datasource).to be_an(Array)
+        expect(instance.datasource.size).to eq(3)
+        expect(instance.datasource[0]).to be_a(Test::Data::Datasource::S3Datasource)
+        expect(instance.datasource[1]).to be_a(Test::Data::Datasource::PolarsDatasource)
+        expect(instance.datasource[2]).to be_a(Test::Data::Datasource::FileDatasource)
+      end
+    end
+
+    describe "Hash of dependencies" do
+      it "handles a hash of dependencies" do
+        df = Polars::DataFrame.new({ id: [1, 2, 3] })
+        instance = FlexibleDataset.new(datasource: {
+                                         source1: s3_attrs,
+                                         source2: df,
+                                         source3: "/local/path"
+                                       })
+
+        expect(instance.datasource).to be_a(Hash)
+        expect(instance.datasource.size).to eq(3)
+        expect(instance.datasource[:source1]).to be_a(Test::Data::Datasource::S3Datasource)
+        expect(instance.datasource[:source2]).to be_a(Test::Data::Datasource::PolarsDatasource)
+        expect(instance.datasource[:source3]).to be_a(Test::Data::Datasource::FileDatasource)
+      end
+    end
+
+    describe "Mixed types and edge cases" do
+      it "handles nested hashes correctly" do
+        instance = FlexibleDataset.new(datasource: {
+                                         source1: { s3: { s3_bucket: "bucket1" } },
+                                         source2: { s3: { s3_bucket: "bucket2" } }
+                                       })
+
+        expect(instance.datasource).to be_a(Hash)
+        expect(instance.datasource.size).to eq(2)
+        expect(instance.datasource[:source1]).to be_a(Test::Data::Datasource::S3Datasource)
+        expect(instance.datasource[:source2]).to be_a(Test::Data::Datasource::S3Datasource)
+        expect(instance.datasource[:source1].s3_bucket).to eq("bucket1")
+        expect(instance.datasource[:source2].s3_bucket).to eq("bucket2")
+      end
+
+      it "raises an error for invalid types" do
+        expect do
+          FlexibleDataset.new(datasource: { invalid_type: { some: "config" } })
+        end.to raise_error(ArgumentError, /Unknown datasource option/)
+      end
     end
   end
 end
