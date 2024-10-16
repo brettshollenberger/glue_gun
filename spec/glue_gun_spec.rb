@@ -809,7 +809,7 @@ RSpec.describe GlueGun::DSL do
 
       attribute :root_dir, :string
 
-      dependency :datasources, { array: true }, DatasourceFactory
+      dependency :datasources, DatasourceFactory
     end
 
     it "initializes an array of dependencies" do
@@ -901,7 +901,7 @@ RSpec.describe GlueGun::DSL do
 
       attribute :root_dir, :string
 
-      dependency :datasources, { hash: true }, DatasourceFactory
+      dependency :datasources, DatasourceFactory
     end
 
     it "initializes a hash of dependencies" do

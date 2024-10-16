@@ -106,15 +106,13 @@ module GlueGun
           factory_class = options
           options = {}
         end
-        is_array = options[:array] || false
-        is_hash = options[:hash] || false
 
         if factory_class.present?
-          dependency_definitions[component_type] = { factory_class: factory_class, array: is_array, hash: is_hash }
+          dependency_definitions[component_type] = { factory_class: factory_class }
         else
           dependency_builder = DependencyBuilder.new(component_type)
           dependency_builder.instance_eval(&block)
-          dependency_definitions[component_type] = { builder: dependency_builder, array: is_array, hash: is_hash }
+          dependency_definitions[component_type] = { builder: dependency_builder }
         end
 
         # Define singleton method to allow hardcoding dependencies in subclasses
