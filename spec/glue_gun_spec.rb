@@ -843,4 +843,114 @@ RSpec.describe GlueGun::DSL do
       expect(instance.datasources[1].df).to eq(df)
     end
   end
+
+  describe "Hash of Dependencies" do
+    class DatasourceFactory
+      include GlueGun::DSL
+
+      dependency :datasource do |dependency|
+        dependency.option :no_op do |option|
+          option.default
+          option.set_class NoOp
+        end
+
+        dependency.option :s3 do |option|
+          option.set_class Test::Data::Datasource::S3Datasource
+          option.bind_attribute :root_dir
+          option.bind_attribute :s3_bucket, required: true
+          option.bind_attribute :s3_access_key_id, default: "12345"
+          option.bind_attribute :polars_args, required: true, default: {}
+        end
+
+        dependency.option :directory do |option|
+          option.set_class Test::Data::Datasource::FileDatasource
+          option.bind_attribute :root_dir do |value|
+            File.join(value, "bingo/bangos")
+          end
+        end
+
+        dependency.option :polars do |option|
+          option.set_class Test::Data::Datasource::PolarsDatasource
+          option.bind_attribute :complex_chain do |value|
+            "#{value} and super cool"
+          end
+        end
+
+        dependency.when do |dep|
+          case dep
+          when Polars::DataFrame
+            { option: :polars, as: :df }
+          when String
+            { option: :directory, as: :root_dir }
+          end
+        end
+      end
+    end
+
+    class DatasetWithHashDependencies
+      include GlueGun::DSL
+
+      attribute :root_dir, :string
+
+      dependency :datasources, { hash: true }, DatasourceFactory
+    end
+
+    it "initializes a hash of dependencies" do
+      df1 = Polars::DataFrame.new({ id: [1, 2, 3] })
+      instance = DatasetWithHashDependencies.new(datasources: {
+                                                   source1: df1,
+                                                   source2: { s3: { s3_bucket: "xyz" } }
+                                                 })
+
+      expect(instance.datasources.size).to eq(2)
+      expect(instance.datasources[:source1]).to be_a(Test::Data::Datasource::PolarsDatasource)
+      expect(instance.datasources[:source1].df).to eq(df1)
+      expect(instance.datasources[:source2]).to be_a(Test::Data::Datasource::S3Datasource)
+      expect(instance.datasources[:source2].s3_bucket).to eq("xyz")
+    end
+
+    it "binds attributes to all dependencies in hash" do
+      instance = DatasetWithHashDependencies.new(datasources: {
+                                                   source1: { s3: { s3_bucket: "abc" } },
+                                                   source2: { s3: { s3_bucket: "xyz" } }
+                                                 })
+
+      expect(instance.datasources[:source1].root_dir).to eq instance.root_dir
+      expect(instance.datasources[:source2].root_dir).to eq instance.root_dir
+
+      instance.root_dir = PROJECT_ROOT
+      expect(instance.datasources[:source1].root_dir).to eq PROJECT_ROOT.to_s
+      expect(instance.datasources[:source2].root_dir).to eq PROJECT_ROOT.to_s
+
+      instance.root_dir = "/Users/me"
+      expect(instance.datasources[:source1].root_dir).to eq "/Users/me"
+      expect(instance.datasources[:source2].root_dir).to eq "/Users/me"
+    end
+
+    it "handles mixed types in the hash" do
+      df = Polars::DataFrame.new({ id: [1, 2, 3] })
+      instance = DatasetWithHashDependencies.new(datasources: {
+                                                   source1: { s3: { s3_bucket: "abc" } },
+                                                   source2: df
+                                                 })
+
+      expect(instance.datasources.size).to eq(2)
+      expect(instance.datasources[:source1]).to be_a(Test::Data::Datasource::S3Datasource)
+      expect(instance.datasources[:source1].s3_bucket).to eq("abc")
+      expect(instance.datasources[:source2]).to be_a(Test::Data::Datasource::PolarsDatasource)
+      expect(instance.datasources[:source2].df).to eq(df)
+    end
+
+    it "allows accessing dependencies by key" do
+      instance = DatasetWithHashDependencies.new(datasources: {
+                                                   source1: { s3: { s3_bucket: "abc" } },
+                                                   source2: "/path/to/dir"
+                                                 })
+
+      expect(instance.datasources[:source1]).to be_a(Test::Data::Datasource::S3Datasource)
+      expect(instance.datasources[:source2]).to be_a(Test::Data::Datasource::FileDatasource)
+      expect(instance.datasources[:source1].s3_bucket).to eq("abc")
+      expect(instance.datasources[:source2].root_dir).to eq("/path/to/dir")
+    end
+  end
 end

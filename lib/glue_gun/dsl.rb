@@ -107,13 +107,14 @@ module GlueGun
           options = {}
         end
         is_array = options[:array] || false
+        is_hash = options[:hash] || false
 
         if factory_class.present?
-          dependency_definitions[component_type] = { factory_class: factory_class, array: is_array }
+          dependency_definitions[component_type] = { factory_class: factory_class, array: is_array, hash: is_hash }
         else
           dependency_builder = DependencyBuilder.new(component_type)
           dependency_builder.instance_eval(&block)
-          dependency_definitions[component_type] = { builder: dependency_builder, array: is_array }
+          dependency_definitions[component_type] = { builder: dependency_builder, array: is_array, hash: is_hash }
         end
 
         # Define singleton method to allow hardcoding dependencies in subclasses
@@ -180,6 +181,7 @@ module GlueGun
     def initialize_dependency(component_type, init_args = {}, definition = nil)
       definition ||= self.class.dependency_definitions[component_type]
       is_array = definition[:array]
+      is_hash = definition[:hash]
 
       if is_array
         dep = []
@@ -188,6 +190,14 @@ module GlueGun
           d, c = initialize_single_dependency(component_type, args, definition)
           dep.push(d)
           config.push(c)
+        end
+      elsif is_hash
+        dep = {}
+        config = {}
+        init_args.each do |key, args|
+          d, c = initialize_single_dependency(component_type, args, definition)
+          dep[key] = d
+          config[key] = c
         end
       else
         dep, config = initialize_single_dependency(component_type, init_args, definition)
@@ -340,6 +350,12 @@ module GlueGun
 
           dependency_instance.zip(option_config).each do |dep, opt|
             propagate_attribute_to_instance(attr_name, value, dep, opt)
+          end
+        elsif dependency_instance.is_a?(Hash)
+          option_config = dependencies.dig(component_type, :option)
+
+          dependency_instance.each do |key, dep|
+            propagate_attribute_to_instance(attr_name, value, dep, option_config[key])
           end
         else
           option_config = dependencies.dig(component_type, :option)
