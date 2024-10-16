@@ -106,15 +106,13 @@ module GlueGun
           factory_class = options
           options = {}
         end
-        is_array = options[:array] || false
-        is_hash = options[:hash] || false
 
         if factory_class.present?
-          dependency_definitions[component_type] = { factory_class: factory_class, array: is_array, hash: is_hash }
+          dependency_definitions[component_type] = { factory_class: factory_class }
         else
           dependency_builder = DependencyBuilder.new(component_type)
           dependency_builder.instance_eval(&block)
-          dependency_definitions[component_type] = { builder: dependency_builder, array: is_array, hash: is_hash }
+          dependency_definitions[component_type] = { builder: dependency_builder }
         end
 
         # Define singleton method to allow hardcoding dependencies in subclasses
@@ -178,10 +176,51 @@ module GlueGun
       end
     end
 
+    def allowed_configurations(init_args, definition)
+      if definition[:factory_class]
+        factory_instance = definition[:factory_class].new
+        dep_defs = factory_instance.dependency_definitions
+        definition = dep_defs[dep_defs.keys.first]
+        return allowed_configurations(init_args, definition)
+      elsif definition[:builder]
+        builder = definition[:builder]
+        allowed_configs = builder.option_configs.keys
+      end
+
+      allowed_configs
+    end
+
+    def is_hash?(init_args, definition)
+      return false unless init_args.is_a?(Hash)
+
+      allowed_configs = allowed_configurations(init_args, definition)
+      return false if allowed_configs.count == 1 && allowed_configs == [:default]
+
+      if init_args.key?(:option_name)
+        allowed_configs.exclude?(init_args[:option_name])
+      else
+        init_args.keys.none? { |k| allowed_configs.include?(k) }
+      end
+    end
+
+    def validate_hash_dependencies(init_args, definition, component_type)
+      allowed_configs = allowed_configurations(init_args, definition)
+
+      init_args.each do |_named_key, configuration|
+        next unless configuration.is_a?(Hash)
+
+        key = configuration.keys.first
+        if key.nil? || allowed_configs.exclude?(key)
+          raise ArgumentError,
+                "Unknown #{component_type} option: #{init_args.keys.first}."
+        end
+      end
+    end
+
     def initialize_dependency(component_type, init_args = {}, definition = nil)
       definition ||= self.class.dependency_definitions[component_type]
-      is_array = definition[:array]
-      is_hash = definition[:hash]
+      is_array = init_args.is_a?(Array)
+      is_hash = is_hash?(init_args, definition)
 
       if is_array
         dep = []
@@ -194,6 +233,8 @@ module GlueGun
       elsif is_hash
         dep = {}
         config = {}
+        validate_hash_dependencies(init_args, definition, component_type)
+
         init_args.each do |key, args|
           d, c = initialize_single_dependency(component_type, args, definition)
           dep[key] = d
@@ -390,14 +431,14 @@ module GlueGun
                        else
                          factory.dependency_definitions.values.first.values.first.option_configs
                        end
-      option_configs.values.select do |option|
+      option_configs.values.detect do |option|
         option_class = option.class_name
         value.is_a?(option_class)
       end
     end
 
     def dependency_injected?(component_type, value)
-      injected_dependency(component_type, value).any?
+      injected_dependency(component_type, value).present?
     end
 
     def dependencies
