@@ -177,10 +177,12 @@ module GlueGun
       end
     end
 
-    def initialize_dependency(component_type, init_args = {}, definition = nil)
+    def initialize_dependency(component_type, init_args = nil, definition = nil)
       definition ||= self.class.dependency_definitions[component_type]
       is_array = init_args.is_a?(Array)
       is_hash = definition.is_hash?(init_args)
+
+      return nil if init_args.nil? && definition.default_option_name.nil?
 
       if is_array
         dep = []
@@ -517,7 +519,11 @@ module GlueGun
       end
 
       def default_option_name
-        @default_option_name || (@single_option ? :default : nil)
+        if factory?
+          builder.default_option_name
+        else
+          @default_option_name || (@single_option ? :default : nil)
+        end
       end
 
       def when(&block)
