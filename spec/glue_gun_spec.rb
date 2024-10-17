@@ -78,6 +78,85 @@ RSpec.describe GlueGun::DSL do
       end
     end
 
+    class FactoryWithDefault
+      include GlueGun::DSL
+
+      dependency :datasource do |dependency|
+        dependency.option :no_op do |option|
+          option.default
+          option.set_class NoOp
+        end
+
+        dependency.option :s3 do |option|
+          option.set_class Test::Data::Datasource::S3Datasource
+          option.bind_attribute :root_dir
+          option.bind_attribute :s3_bucket, required: true
+          option.bind_attribute :s3_access_key_id, default: "12345"
+          option.bind_attribute :polars_args, required: true, default: {}
+        end
+
+        dependency.option :directory do |option|
+          option.set_class Test::Data::Datasource::FileDatasource
+          option.bind_attribute :root_dir do |value|
+            File.join(value, "bingo/bangos")
+          end
+        end
+
+        dependency.option :polars do |option|
+          option.set_class Test::Data::Datasource::PolarsDatasource
+          option.bind_attribute :complex_chain do |value|
+            "#{value} and super cool"
+          end
+        end
+
+        dependency.when do |dep|
+          case dep
+          when Polars::DataFrame
+            { option: :polars, as: :df }
+          when String
+            { option: :directory, as: :root_dir }
+          end
+        end
+      end
+    end
+
+    class DatasourceFactory
+      include GlueGun::DSL
+
+      dependency :datasource do |dependency|
+        dependency.option :s3 do |option|
+          option.set_class Test::Data::Datasource::S3Datasource
+          option.bind_attribute :root_dir
+          option.bind_attribute :s3_bucket, required: true
+          option.bind_attribute :s3_access_key_id, default: "12345"
+          option.bind_attribute :polars_args, required: true, default: {}
+        end
+
+        dependency.option :directory do |option|
+          option.set_class Test::Data::Datasource::FileDatasource
+          option.bind_attribute :root_dir do |value|
+            File.join(value, "bingo/bangos")
+          end
+        end
+
+        dependency.option :polars do |option|
+          option.set_class Test::Data::Datasource::PolarsDatasource
+          option.bind_attribute :complex_chain do |value|
+            "#{value} and super cool"
+          end
+        end
+
+        dependency.when do |dep|
+          case dep
+          when Polars::DataFrame
+            { option: :polars, as: :df }
+          when String
+            { option: :directory, as: :root_dir }
+          end
+        end
+      end
+    end
+
     # Define SomethingCool class using the new GlueGun::DSL
     class SomethingCool
       include GlueGun::DSL
@@ -662,53 +741,17 @@ RSpec.describe GlueGun::DSL do
         }
       }
     end
-    class DatasourceFactory
-      include GlueGun::DSL
-
-      dependency :datasource do |dependency|
-        dependency.option :no_op do |option|
-          option.default
-          option.set_class NoOp
-        end
-
-        dependency.option :s3 do |option|
-          option.set_class Test::Data::Datasource::S3Datasource
-          option.bind_attribute :root_dir
-          option.bind_attribute :s3_bucket, required: true
-          option.bind_attribute :s3_access_key_id, default: "12345"
-          option.bind_attribute :polars_args, required: true, default: {}
-        end
-
-        dependency.option :directory do |option|
-          option.set_class Test::Data::Datasource::FileDatasource
-          option.bind_attribute :root_dir do |value|
-            File.join(value, "bingo/bangos")
-          end
-        end
-
-        dependency.option :polars do |option|
-          option.set_class Test::Data::Datasource::PolarsDatasource
-          option.bind_attribute :complex_chain do |value|
-            "#{value} and super cool"
-          end
-        end
-
-        dependency.when do |dep|
-          case dep
-          when Polars::DataFrame
-            { option: :polars, as: :df }
-          when String
-            { option: :directory, as: :root_dir }
-          end
-        end
-      end
-    end
-
     # Define a new class that uses the DatasourceFactory
     class Dataset
       include GlueGun::DSL
 
       dependency :datasource, DatasourceFactory
+    end
+
+    class DatasetWithDefault
+      include GlueGun::DSL
+
+      dependency :datasource, FactoryWithDefault
     end
 
     it "creates a datasource using the factory" do
@@ -718,8 +761,16 @@ RSpec.describe GlueGun::DSL do
     end
 
     it "uses the default option when no specific option is provided" do
-      instance = Dataset.new
+      instance = DatasetWithDefault.new
       expect(instance.datasource).to be_a(NoOp)
+    end
+
+    it "lazy initializes when no option provided" do
+      instance = Dataset.new
+      expect(instance.datasource).to be_nil
+
+      instance.datasource = Polars::DataFrame.new({ id: [1, 2, 3] })
+      expect(instance.datasource).to be_a Test::Data::Datasource::PolarsDatasource
     end
 
     it "handles Polars::DataFrame correctly" do
@@ -762,48 +813,6 @@ RSpec.describe GlueGun::DSL do
   end
 
   describe "Array of Dependencies" do
-    class DatasourceFactory
-      include GlueGun::DSL
-
-      dependency :datasource do |dependency|
-        dependency.option :no_op do |option|
-          option.default
-          option.set_class NoOp
-        end
-
-        dependency.option :s3 do |option|
-          option.set_class Test::Data::Datasource::S3Datasource
-          option.bind_attribute :root_dir
-          option.bind_attribute :s3_bucket, required: true
-          option.bind_attribute :s3_access_key_id, default: "12345"
-          option.bind_attribute :polars_args, required: true, default: {}
-        end
-
-        dependency.option :directory do |option|
-          option.set_class Test::Data::Datasource::FileDatasource
-          option.bind_attribute :root_dir do |value|
-            File.join(value, "bingo/bangos")
-          end
-        end
-
-        dependency.option :polars do |option|
-          option.set_class Test::Data::Datasource::PolarsDatasource
-          option.bind_attribute :complex_chain do |value|
-            "#{value} and super cool"
-          end
-        end
-
-        dependency.when do |dep|
-          case dep
-          when Polars::DataFrame
-            { option: :polars, as: :df }
-          when String
-            { option: :directory, as: :root_dir }
-          end
-        end
-      end
-    end
-
     class DatasetWithArrayDependencies
       include GlueGun::DSL
 
@@ -854,48 +863,6 @@ RSpec.describe GlueGun::DSL do
   end
 
   describe "Hash of Dependencies" do
-    class DatasourceFactory
-      include GlueGun::DSL
-
-      dependency :datasource do |dependency|
-        dependency.option :no_op do |option|
-          option.default
-          option.set_class NoOp
-        end
-
-        dependency.option :s3 do |option|
-          option.set_class Test::Data::Datasource::S3Datasource
-          option.bind_attribute :root_dir
-          option.bind_attribute :s3_bucket, required: true
-          option.bind_attribute :s3_access_key_id, default: "12345"
-          option.bind_attribute :polars_args, required: true, default: {}
-        end
-
-        dependency.option :directory do |option|
-          option.set_class Test::Data::Datasource::FileDatasource
-          option.bind_attribute :root_dir do |value|
-            File.join(value, "bingo/bangos")
-          end
-        end
-
-        dependency.option :polars do |option|
-          option.set_class Test::Data::Datasource::PolarsDatasource
-          option.bind_attribute :complex_chain do |value|
-            "#{value} and super cool"
-          end
-        end
-
-        dependency.when do |dep|
-          case dep
-          when Polars::DataFrame
-            { option: :polars, as: :df }
-          when String
-            { option: :directory, as: :root_dir }
-          end
-        end
-      end
-    end
-
     class DatasetWithHashDependencies
       include GlueGun::DSL
 
@@ -989,13 +956,18 @@ RSpec.describe GlueGun::DSL do
         expect(instance.datasource.df).to eq(df)
       end
 
-      it "uses the default option when no specific option is provided" do
+      it "is nil if no option provided" do
         instance = FlexibleDataset.new
-        expect(instance.datasource).to be_a(NoOp)
+        expect(instance.datasource).to be_nil
       end
     end
 
     describe "Array of dependencies" do
+      it "handles empty array" do
+        instance = FlexibleDataset.new(datasource: [])
+        expect(instance.datasource.count).to eq 0
+      end
+
       it "handles an array of dependencies" do
         df = Polars::DataFrame.new({ id: [1, 2, 3] })
         instance = FlexibleDataset.new(datasource: [s3_attrs, df, "/local/path"])
