@@ -107,13 +107,14 @@ module GlueGun
           options = {}
         end
 
+        dependency_builder = DependencyBuilder.new(component_type)
+
         if factory_class.present?
-          dependency_definitions[component_type] = { factory_class: factory_class }
+          dependency_builder.set_factory_class(factory_class)
         else
-          dependency_builder = DependencyBuilder.new(component_type)
           dependency_builder.instance_eval(&block)
-          dependency_definitions[component_type] = { builder: dependency_builder }
         end
+        dependency_definitions[component_type] = dependency_builder
 
         # Define singleton method to allow hardcoding dependencies in subclasses
         define_singleton_method component_type do |option = nil, options = {}|
@@ -176,72 +177,31 @@ module GlueGun
       end
     end
 
-    def allowed_configurations(init_args, definition)
-      if definition[:factory_class]
-        factory_instance = definition[:factory_class].new
-        dep_defs = factory_instance.dependency_definitions
-        definition = dep_defs[dep_defs.keys.first]
-        return allowed_configurations(init_args, definition)
-      elsif definition[:builder]
-        builder = definition[:builder]
-        allowed_configs = builder.option_configs.keys
-      end
-
-      allowed_configs
-    end
-
-    def is_hash?(init_args, definition)
-      return false unless init_args.is_a?(Hash)
-
-      allowed_configs = allowed_configurations(init_args, definition)
-      return false if allowed_configs.count == 1 && allowed_configs == [:default]
-
-      if init_args.key?(:option_name)
-        allowed_configs.exclude?(init_args[:option_name])
-      else
-        init_args.keys.none? { |k| allowed_configs.include?(k) }
-      end
-    end
-
-    def validate_hash_dependencies(init_args, definition, component_type)
-      allowed_configs = allowed_configurations(init_args, definition)
-
-      init_args.each do |_named_key, configuration|
-        next unless configuration.is_a?(Hash)
-
-        key = configuration.keys.first
-        if key.nil? || allowed_configs.exclude?(key)
-          raise ArgumentError,
-                "Unknown #{component_type} option: #{init_args.keys.first}."
-        end
-      end
-    end
-
     def initialize_dependency(component_type, init_args = {}, definition = nil)
       definition ||= self.class.dependency_definitions[component_type]
       is_array = init_args.is_a?(Array)
-      is_hash = is_hash?(init_args, definition)
+      is_hash = definition.is_hash?(init_args)
 
       if is_array
         dep = []
         config = []
         Array(init_args).each do |args|
-          d, c = initialize_single_dependency(component_type, args, definition)
+          d, c = definition.initialize_single_dependency(args, self)
           dep.push(d)
           config.push(c)
         end
       elsif is_hash
         dep = {}
         config = {}
-        validate_hash_dependencies(init_args, definition, component_type)
+        definition.validate_hash_dependencies(init_args)
 
         init_args.each do |key, args|
-          d, c = initialize_single_dependency(component_type, args, definition)
+          d, c = definition.initialize_single_dependency(args, self)
           dep[key] = d
           config[key] = c
         end
       else
-        dep, config = initialize_single_dependency(component_type, init_args, definition)
+        dep, config = definition.initialize_single_dependency(init_args, self)
       end
 
       dependencies[component_type] = {
@@ -250,126 +210,6 @@ module GlueGun
       }
 
       dep
-    end
-
-    def initialize_factory_dependency(component_type, init_args, definition)
-      factory_instance = definition[:factory_class].new
-
-      # Pass the parent instance to the factory
-      factory_instance.instance_variable_set(:@parent, self)
-
-      dep_defs = factory_instance.dependency_definitions
-      definition = dep_defs[dep_defs.keys.first]
-
-      if dep_defs.key?(component_type)
-        factory_instance.send(:initialize_single_dependency, component_type, init_args, definition)
-      elsif dep_defs.keys.one?
-        factory_instance.send(:initialize_single_dependency, dep_defs.keys.first, init_args, definition)
-      else
-        raise ArgumentError,
-              "Don't know how to use Factory #{factory_instance.class} to build dependency '#{component_type}'"
-      end
-    end
-
-    def initialize_builder_dependency(component_type, init_args, definition)
-      dependency_builder = definition[:builder]
-
-      if init_args && init_args.is_a?(Hash) && init_args.key?(:option_name)
-        option_name = init_args[:option_name]
-        init_args = init_args[:value]
-      else
-        option_name, init_args = determine_option_name(component_type, init_args)
-      end
-
-      option_config = dependency_builder.option_configs[option_name]
-
-      raise ArgumentError, "Unknown #{component_type} option '#{option_name}'" unless option_config
-
-      [instantiate_dependency(option_config, init_args), option_config]
-    end
-
-    def initialize_single_dependency(component_type, init_args, definition)
-      if dependency_injected?(component_type, init_args)
-        dep = init_args
-        option_config = injected_dependency(component_type, init_args)
-      elsif definition[:factory_class]
-        dep, option_config = initialize_factory_dependency(component_type, init_args, definition)
-      else
-        dep, option_config = initialize_builder_dependency(component_type, init_args, definition)
-      end
-
-      [dep, option_config]
-    end
-
-    def build_dependency_attributes(option_config, dep_attributes)
-      option_config.attributes.each do |attr_name, attr_config|
-        if dep_attributes.key?(attr_name)
-          value = dep_attributes[attr_name]
-        else
-          value = if attr_config.source && respond_to?(attr_config.source)
-                    send(attr_config.source)
-                  elsif respond_to?(attr_name)
-                    send(attr_name)
-                  elsif instance_variable_defined?(:@parent) && @parent.respond_to?(attr_name)
-                    @parent.send(attr_name)
-                  else
-                    attr_config.default
-                  end
-          value = attr_config.process_value(value, self) if attr_config.respond_to?(:process_value)
-          dep_attributes[attr_name] = value
-        end
-      end
-
-      dep_attributes
-    end
-
-    def determine_option_name(component_type, init_args)
-      dependency_builder = self.class.dependency_definitions[component_type][:builder]
-
-      option_name = nil
-
-      # Use when block if defined
-      if dependency_builder.when_block
-        result = instance_exec(init_args, &dependency_builder.when_block)
-        if result.is_a?(Hash) && result[:option]
-          option_name = result[:option]
-          as_attr = result[:as]
-          init_args = { as_attr => init_args } if as_attr && init_args
-        end
-      end
-
-      # Detect option from user input
-      if option_name.nil? && (init_args.is_a?(Hash) && init_args.keys.size == 1)
-        if dependency_builder.option_configs.key?(init_args.keys.first)
-          option_name = init_args.keys.first
-          init_args = init_args[option_name] # Extract the inner value
-        else
-          default_option = dependency_builder.get_option(dependency_builder.default_option_name)
-          raise ArgumentError, "Unknown #{component_type} option: #{init_args.keys.first}." unless default_option.only?
-          unless default_option.attributes.keys.include?(init_args.keys.first)
-            raise ArgumentError, "#{default_option.class_name} does not respond to #{init_args.keys.first}"
-          end
-        end
-      end
-
-      # Use default option if none determined
-      option_name ||= dependency_builder.default_option_name
-
-      [option_name, init_args]
-    end
-
-    def instantiate_dependency(option_config, init_args)
-      dep_attributes = init_args.is_a?(Hash) ? init_args : {}
-
-      # Build dependency attributes, including sourcing from parent
-      dep_attributes = build_dependency_attributes(option_config, dep_attributes)
-
-      if dep_attributes.key?(:id)
-        raise ArgumentError,
-              "cannot bind attribute 'id' between #{self.class.name} and #{option_config.class_name}. ID is reserved for primary keys in Ruby on Rails"
-      end
-      dependency_class = option_config.class_name
-      dependency_class.new(dep_attributes)
     end
 
     def propagate_changes
@@ -421,26 +261,6 @@ module GlueGun
       end
     end
 
-    def injected_dependency(component_type, value)
-      definition = self.class.dependency_definitions[component_type]
-      builder = definition[:builder]
-      factory = definition[:factory_class]
-
-      option_configs = if builder
-                         builder.option_configs
-                       else
-                         factory.dependency_definitions.values.first.values.first.option_configs
-                       end
-      option_configs.values.detect do |option|
-        option_class = option.class_name
-        value.is_a?(option_class)
-      end
-    end
-
-    def dependency_injected?(component_type, value)
-      injected_dependency(component_type, value).present?
-    end
-
     def dependencies
       @dependencies ||= {}
     end
@@ -490,7 +310,7 @@ module GlueGun
     end
 
     class DependencyBuilder
-      attr_reader :component_type, :option_configs, :when_block, :is_only
+      attr_reader :component_type, :option_configs, :when_block, :is_only, :factory_class
 
       def initialize(component_type)
         @component_type = component_type
@@ -498,6 +318,180 @@ module GlueGun
         @default_option_name = nil
         @single_option = nil
         @is_only = false
+      end
+
+      def set_factory_class(factory_class)
+        @factory_class = factory_class
+      end
+
+      def builder
+        if factory?
+          factory_instance = factory_class.new
+          dep_defs = factory_instance.dependency_definitions
+          dep_defs[dep_defs.keys.first]
+        else
+          self
+        end
+      end
+
+      def get_option_configs
+        builder.option_configs
+      end
+
+      def allowed_configurations
+        get_option_configs.keys
+      end
+
+      def allowed_classes
+        get_option_configs.values
+      end
+
+      def factory?
+        @factory_class.present?
+      end
+
+      def builder?
+        !factory?
+      end
+
+      def is_hash?(init_args)
+        return false unless init_args.is_a?(Hash)
+
+        allowed_configs = allowed_configurations
+        return false if allowed_configs.count == 1 && allowed_configs == [:default]
+
+        if init_args.key?(:option_name)
+          allowed_configs.exclude?(init_args[:option_name])
+        else
+          init_args.keys.none? { |k| allowed_configs.include?(k) }
+        end
+      end
+
+      def initialize_factory_dependency(init_args, parent)
+        builder.initialize_single_dependency(init_args, parent)
+      end
+
+      def initialize_builder_dependency(init_args, parent)
+        if init_args && init_args.is_a?(Hash) && init_args.key?(:option_name)
+          option_name = init_args[:option_name]
+          init_args = init_args[:value]
+        else
+          option_name, init_args = determine_option_name(init_args)
+        end
+
+        option_config = option_configs[option_name]
+
+        raise ArgumentError, "Unknown #{component_type} option '#{option_name}'" unless option_config
+
+        [instantiate_dependency(option_config, init_args, parent), option_config]
+      end
+
+      def initialize_single_dependency(init_args, parent)
+        if dependency_injected?(init_args)
+          dep = init_args
+          option_config = injected_dependency(init_args)
+        elsif factory?
+          dep, option_config = initialize_factory_dependency(init_args, parent)
+        else
+          dep, option_config = initialize_builder_dependency(init_args, parent)
+        end
+
+        [dep, option_config]
+      end
+
+      def build_dependency_attributes(option_config, dep_attributes, parent)
+        option_config.attributes.each do |attr_name, attr_config|
+          if dep_attributes.key?(attr_name)
+            value = dep_attributes[attr_name]
+          else
+            value = if attr_config.source && parent.respond_to?(attr_config.source)
+                      parent.send(attr_config.source)
+                    elsif parent.respond_to?(attr_name)
+                      parent.send(attr_name)
+                    else
+                      attr_config.default
+                    end
+            value = attr_config.process_value(value, self) if attr_config.respond_to?(:process_value)
+            dep_attributes[attr_name] = value
+          end
+        end
+
+        dep_attributes
+      end
+
+      def determine_option_name(init_args)
+        option_name = nil
+
+        # Use when block if defined
+        if when_block
+          result = instance_exec(init_args, &when_block)
+          if result.is_a?(Hash) && result[:option]
+            option_name = result[:option]
+            as_attr = result[:as]
+            init_args = { as_attr => init_args } if as_attr && init_args
+          end
+        end
+
+        # Detect option from user input
+        if option_name.nil? && (init_args.is_a?(Hash) && init_args.keys.size == 1)
+          if option_configs.key?(init_args.keys.first)
+            option_name = init_args.keys.first
+            init_args = init_args[option_name] # Extract the inner value
+          else
+            default_option = get_option(default_option_name)
+            unless default_option.only?
+              raise ArgumentError,
+                    "Unknown #{component_type} option: #{init_args.keys.first}."
+            end
+            unless default_option.attributes.keys.include?(init_args.keys.first)
+              raise ArgumentError, "#{default_option.class_name} does not respond to #{init_args.keys.first}"
+            end
+          end
+        end
+
+        # Use default option if none determined
+        option_name ||= default_option_name
+
+        [option_name, init_args]
+      end
+
+      def instantiate_dependency(option_config, init_args, parent)
+        dep_attributes = init_args.is_a?(Hash) ? init_args : {}
+
+        # Build dependency attributes, including sourcing from parent
+        dep_attributes = build_dependency_attributes(option_config, dep_attributes, parent)
+
+        if dep_attributes.key?(:id)
+          raise ArgumentError,
+                "cannot bind attribute 'id' between #{parent.class.name} and #{option_config.class_name}. ID is reserved for primary keys in Ruby on Rails"
+        end
+        dependency_class = option_config.class_name
+        dependency_class.new(dep_attributes)
+      end
+
+      def injected_dependency(value)
+        allowed_classes.detect do |option|
+          option_class = option.class_name
+          value.is_a?(option_class)
+        end
+      end
+
+      def dependency_injected?(value)
+        injected_dependency(value).present?
+      end
+
+      def validate_hash_dependencies(init_args)
+        allowed_configs = allowed_configurations
+
+        init_args.each do |_named_key, configuration|
+          next unless configuration.is_a?(Hash)
+
+          key = configuration.keys.first
+          if key.nil? || allowed_configs.exclude?(key)
+            raise ArgumentError,
+                  "Unknown #{component_type} option: #{init_args.keys.first}."
+          end
+        end
       end
 
       # Support set_class and attribute for single-option dependencies
