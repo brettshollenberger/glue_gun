@@ -107,7 +107,7 @@ module GlueGun
           options = {}
         end
 
-        dependency_builder = DependencyBuilder.new(component_type)
+        dependency_builder = DependencyBuilder.new(component_type, options)
 
         if factory_class.present?
           dependency_builder.set_factory_class(factory_class)
@@ -182,7 +182,12 @@ module GlueGun
       is_array = init_args.is_a?(Array)
       is_hash = definition.is_hash?(init_args)
 
-      return nil if init_args.nil? && definition.default_option_name.nil?
+      if init_args.nil? && definition.default_option_name.nil?
+        return nil if definition.lazy?
+        if definition.when_block.nil?
+          raise "No default option or when block present for component_type #{component_type}. Don't know how to build!"
+        end
+      end
 
       if is_array
         dep = []
@@ -312,14 +317,15 @@ module GlueGun
     end
 
     class DependencyBuilder
-      attr_reader :component_type, :option_configs, :when_block, :is_only, :factory_class
+      attr_reader :component_type, :option_configs, :when_block, :is_only, :factory_class, :lazy, :parent
 
-      def initialize(component_type)
+      def initialize(component_type, options)
         @component_type = component_type
         @option_configs = {}
         @default_option_name = nil
         @single_option = nil
         @is_only = false
+        @lazy = options.key?(:lazy) ? options.dig(:lazy) : true
       end
 
       def set_factory_class(factory_class)
@@ -356,6 +362,10 @@ module GlueGun
         !factory?
       end
 
+      def lazy?
+        @lazy == true
+      end
+
       def is_hash?(init_args)
         return false unless init_args.is_a?(Hash)
 
@@ -369,33 +379,33 @@ module GlueGun
         end
       end
 
-      def initialize_factory_dependency(init_args, parent)
-        builder.initialize_single_dependency(init_args, parent)
+      def initialize_factory_dependency(init_args, instance)
+        builder.initialize_single_dependency(init_args, instance)
       end
 
-      def initialize_builder_dependency(init_args, parent)
+      def initialize_builder_dependency(init_args, instance)
         if init_args && init_args.is_a?(Hash) && init_args.key?(:option_name)
           option_name = init_args[:option_name]
           init_args = init_args[:value]
         else
-          option_name, init_args = determine_option_name(init_args)
+          option_name, init_args = determine_option_name(init_args, instance)
         end
 
         option_config = option_configs[option_name]
 
         raise ArgumentError, "Unknown #{component_type} option '#{option_name}'" unless option_config
 
-        [instantiate_dependency(option_config, init_args, parent), option_config]
+        [instantiate_dependency(option_config, init_args, instance), option_config]
       end
 
-      def initialize_single_dependency(init_args, parent)
+      def initialize_single_dependency(init_args, instance)
         if dependency_injected?(init_args)
           dep = init_args
           option_config = injected_dependency(init_args)
         elsif factory?
-          dep, option_config = initialize_factory_dependency(init_args, parent)
+          dep, option_config = initialize_factory_dependency(init_args, instance)
         else
-          dep, option_config = initialize_builder_dependency(init_args, parent)
+          dep, option_config = initialize_builder_dependency(init_args, instance)
         end
 
         [dep, option_config]
@@ -421,12 +431,12 @@ module GlueGun
         dep_attributes
       end
 
-      def determine_option_name(init_args)
+      def determine_option_name(init_args, instance)
         option_name = nil
 
         # Use when block if defined
         if when_block
-          result = instance_exec(init_args, &when_block)
+          result = instance.instance_exec(init_args, &when_block)
           if result.is_a?(Hash) && result[:option]
             option_name = result[:option]
             as_attr = result[:as]

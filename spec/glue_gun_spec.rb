@@ -157,6 +157,22 @@ RSpec.describe GlueGun::DSL do
       end
     end
 
+    class PolarsHelper
+      include GlueGun::DSL
+    end
+
+    class S3Helper
+      include GlueGun::DSL
+    end
+
+    class DirectoryHelper
+      include GlueGun::DSL
+    end
+
+    class NoopHelper
+      include GlueGun::DSL
+    end
+
     # Define SomethingCool class using the new GlueGun::DSL
     class SomethingCool
       include GlueGun::DSL
@@ -222,6 +238,37 @@ RSpec.describe GlueGun::DSL do
             { option: :polars, as: :df }
           when String
             { option: :directory, as: :root_dir }
+          end
+        end
+      end
+
+      dependency :datasource_helper, lazy: false do |dep|
+        dep.option :no_op do |option|
+          option.set_class NoopHelper
+        end
+
+        dep.option :s3 do |option|
+          option.set_class S3Helper
+        end
+
+        dep.option :directory do |option|
+          option.set_class DirectoryHelper
+        end
+
+        dep.option :polars do |option|
+          option.set_class PolarsHelper
+        end
+
+        dep.when do |_dep|
+          case datasource
+          when Test::Data::Datasource::PolarsDatasource
+            { option: :polars }
+          when Test::Data::Datasource::FileDatasource
+            { option: :directory }
+          when Test::Data::Datasource::S3Datasource
+            { option: :s3 }
+          when NoOp
+            { option: :no_op }
           end
         end
       end
@@ -470,6 +517,13 @@ RSpec.describe GlueGun::DSL do
 
         expect(instance.datasource).to be_a(Test::Data::Datasource::PolarsDatasource)
         expect(instance.datasource.df).to eq df
+      end
+
+      it "can reference other dependencies in when block" do
+        df = Polars::DataFrame.new({ id: [1, 2, 3] })
+        instance = test_class.new(age: 30, datasource: df)
+
+        expect(instance.datasource_helper).to be_a(PolarsHelper)
       end
 
       it "respects dependency-injection" do
