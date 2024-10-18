@@ -272,6 +272,10 @@ module GlueGun
       @dependencies ||= {}
     end
 
+    def inspect
+      "#<#{self.class} #{attributes.map { |k, v| "#{k}: #{v.inspect}" }.join(", ")}>"
+    end
+
     def validate_dependencies
       errors.clear
       self.class.dependency_definitions.keys.each do |component_type|
@@ -414,7 +418,7 @@ module GlueGun
       def build_dependency_attributes(option_config, dep_attributes, parent)
         option_config.attributes.each do |attr_name, attr_config|
           if dep_attributes.key?(attr_name)
-            value = dep_attributes[attr_name]
+            dep_attributes[attr_name]
           else
             value = if attr_config.source && parent.respond_to?(attr_config.source)
                       parent.send(attr_config.source)
