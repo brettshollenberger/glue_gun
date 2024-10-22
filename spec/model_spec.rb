@@ -1,7 +1,7 @@
 require "polars"
 require "spec_helper"
 
-RSpec.describe GlueGun::Model do
+module ModelTest
   class PolarsDatasource
     include GlueGun::DSL
 
@@ -160,7 +160,9 @@ RSpec.describe GlueGun::Model do
     belongs_to :datasource,
                foreign_key: :datasource_id
   end
+end
 
+RSpec.describe GlueGun::Model do
   describe "Independent models" do
     describe "Polars Datasource" do
       let(:df) do
@@ -181,12 +183,12 @@ RSpec.describe GlueGun::Model do
 
       it "creates polars datasources" do
         # Save the serialized DataFrame to the database
-        datasource = Datasource.create!(
+        datasource = ModelTest::Datasource.create!(
           name: "My Polars Df",
           df: df
         )
 
-        datasource = Datasource.find(datasource.id)
+        datasource = ModelTest::Datasource.find(datasource.id)
         expect(datasource.data).to eq df
       end
     end
@@ -195,7 +197,7 @@ RSpec.describe GlueGun::Model do
       it "saves and loads the s3 datasource" do
         path = SPEC_ROOT.join("files")
 
-        s3_datasource = Datasource.create!(
+        s3_datasource = ModelTest::Datasource.create!(
           name: "s3 Datasource",
           root_dir: path,
           s3_bucket: "bucket",
@@ -204,7 +206,7 @@ RSpec.describe GlueGun::Model do
           s3_secret_access_key: "12345"
         )
 
-        datasource = Datasource.find(s3_datasource.id)
+        datasource = ModelTest::Datasource.find(s3_datasource.id)
         expect(datasource.datasource_service.s3_bucket).to eq "bucket"
         expect(datasource.data).to eq(Polars.read_csv(path.join("file.csv")))
       end
@@ -212,7 +214,7 @@ RSpec.describe GlueGun::Model do
   end
 
   describe "Models w/ dependencies" do
-    it "builds them properly", :focus do
+    it "builds them properly" do
       df = Polars::DataFrame.new({
                                    id: [1, 2, 3, 4, 5, 6, 7, 8],
                                    rev: [0, 0, 100, 200, 0, 300, 400, 500],
@@ -226,25 +228,27 @@ RSpec.describe GlueGun::Model do
       df.with_column(
         Polars.col("created_date").str.strptime(Polars::Datetime, "%Y-%m-%d").alias("created_date")
       )
-      datasource = Datasource.create!(
+      datasource = ModelTest::Datasource.create!(
         name: "My Polars Df",
         df: df
       )
 
-      dataset = Dataset.create(
+      dataset = ModelTest::Dataset.create(
         name: "My Dataset",
         datasource: datasource,
         splitter: {
           date: {
-            months_test: 2
+            months_test: 3
           }
         }
       )
 
-      dataset = Dataset.find(dataset.id)
+      dataset = ModelTest::Dataset.find(dataset.id)
+
       expect(dataset.datasource.data).to eq df
-      expect(dataset.splitter).to be_a DateSplitter
-      expect(dataset.splitter.months_test).to eq 2
+      expect(dataset.splitter).to be_a ModelTest::DateSplitter
+      expect(dataset.splitter.months_test).to eq 3
+      expect(dataset.splitter.months_valid).to eq 2
     end
   end
 end

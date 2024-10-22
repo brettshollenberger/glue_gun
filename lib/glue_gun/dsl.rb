@@ -432,7 +432,7 @@ module GlueGun
           end
         end
 
-        dep_attributes
+        dep_attributes.deep_compact
       end
 
       def determine_option_name(init_args, instance)
