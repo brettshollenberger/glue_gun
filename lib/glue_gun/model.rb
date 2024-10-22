@@ -76,7 +76,7 @@ module GlueGun
 
     def extract_service_attributes(attributes, service_class)
       allowed_attrs = service_attributes(service_class)
-      attributes.slice(*allowed_attrs)
+      attrs_and_associations(attributes).slice(*allowed_attrs)
     end
 
     def service_attributes(service_class)
@@ -85,9 +85,32 @@ module GlueGun
       )
     end
 
+    def attrs_and_associations(attributes)
+      foreign_keys = foreign_key_map
+      attributes.inject({}) do |h, (k, v)|
+        h.tap do
+          if foreign_keys.include?(k)
+            assoc_name = foreign_keys[k]
+            h[assoc_name] = send(assoc_name)
+          else
+            h[k] = v
+          end
+        end
+      end
+    end
+
+    def foreign_key_map
+      self.class.reflect_on_all_associations.inject({}) do |h, assoc|
+        h.tap do
+          h[assoc.foreign_key] = assoc.name
+        end
+      end.symbolize_keys
+    end
+
     def serialize_service_object
       service_object = instance_variable_get("@#{service_attribute_name}")
-      attrs = service_object.respond_to?(:serialize) ? service_object.serialize : service_object.attributes
+      service_klass = service_object.class
+      attrs = service_klass.respond_to?(:serialize) ? service_klass.serialize(service_object) : service_object.attributes
       deps = allowed_names(service_object.dependency_definitions.keys).inject({}) do |hash, dep|
         hash.tap do
           this_dep = service_object.send(dep)
@@ -114,8 +137,7 @@ module GlueGun
       serialized_data = JSON.parse(read_attribute(:configuration) || "{}")
       serialized_data.deep_symbolize_keys!
       service_class = resolve_service_class(serialized_data)
-      deserializer = service_class.new
-      serialized_data = deserializer.deserialize(serialized_data) if deserializer.respond_to?(:deserialize)
+      serialized_data = service_class.deserialize(serialized_data) if service_class.respond_to?(:deserialize)
       service_instance = service_class.new(serialized_data)
       instance_variable_set("@#{service_attribute_name}", service_instance)
       # define_service_delegators(service_class)

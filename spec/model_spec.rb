@@ -11,13 +11,13 @@ module ModelTest
       df
     end
 
-    def serialize
+    def self.serialize(datasource)
       {
-        df: JSON.parse(df.write_json)
+        df: JSON.parse(datasource.df.write_json)
       }
     end
 
-    def deserialize(options)
+    def self.deserialize(options)
       df = options[:df]
       columns = df[:columns].map do |col|
         # Determine the correct data type
@@ -125,6 +125,142 @@ module ModelTest
     end
   end
 
+  class Split
+    include GlueGun::DSL
+
+    attribute :polars_args, :hash, default: {}
+    attribute :max_rows_per_file, :integer, default: 1_000_000
+    attribute :batch_size, :integer, default: 10_000
+    attribute :verbose, :boolean, default: false
+
+    def schema
+      polars_args[:dtypes]
+    end
+
+    def cast(df)
+      cast_cols = schema.keys & df.columns
+      df = df.with_columns(
+        cast_cols.map do |column|
+          dtype = schema[column]
+          df[column].cast(dtype).alias(column)
+        end
+      )
+    end
+
+    # List of file paths, these will be csvs
+    def save_schema(files)
+      combined_schema = {}
+
+      files.each do |file|
+        df = Polars.read_csv(file, **polars_args)
+
+        df.schema.each do |column, dtype|
+          combined_schema[column] = if combined_schema.key?(column)
+                                      resolve_dtype(combined_schema[column], dtype)
+                                    else
+                                      dtype
+                                    end
+        end
+      end
+
+      polars_args[:dtypes] = combined_schema
+    end
+
+    def resolve_dtype(dtype1, dtype2)
+      # Example of simple rules: prioritize Float64 over Int64
+      if [dtype1, dtype2].include?(:float64)
+        :float64
+      elsif [dtype1, dtype2].include?(:int64)
+        :int64
+      else
+        # If both are the same, return any
+        dtype1
+      end
+    end
+
+    def split_features_targets(df, split_ys, target)
+      raise ArgumentError, "Target column must be specified when split_ys is true" if split_ys && target.nil?
+
+      if split_ys
+        xs = df.drop(target)
+        ys = df.select(target)
+        [xs, ys]
+      else
+        df
+      end
+    end
+
+    protected
+
+    def create_progress_bar(segment, total_rows)
+      ProgressBar.create(
+        title: "Reading #{segment}",
+        total: total_rows,
+        format: "%t: |%B| %p%% %e"
+      )
+    end
+
+    def process_block_with_split_ys(block, result, xs, ys)
+      case block.arity
+      when 3
+        result.nil? ? [xs, ys] : block.call(result, xs, ys)
+      when 2
+        block.call(xs, ys)
+        result
+      else
+        raise ArgumentError, "Block must accept 2 or 3 arguments when split_ys is true"
+      end
+    end
+
+    def process_block_without_split_ys(block, result, df)
+      case block.arity
+      when 2
+        result.nil? ? df : block.call(result, df)
+      when 1
+        block.call(df)
+        result
+      else
+        raise ArgumentError, "Block must accept 1 or 2 arguments when split_ys is false"
+      end
+    end
+  end
+
+  class InMemorySplit < Split
+    include GlueGun::DSL
+
+    def initialize(options)
+      super
+      @data = {}
+    end
+
+    def save(segment, df)
+      @data[segment] = df
+    end
+
+    def read(segment, split_ys: false, target: nil, drop_cols: [], filter: nil)
+      df = if segment.to_s == "all"
+             Polars.concat(%i[train test valid].map { |segment| @data[segment] })
+           else
+             @data[segment]
+           end
+      return nil if df.nil?
+
+      df = df.filter(filter) if filter.present?
+      drop_cols &= df.columns
+      df = df.drop(drop_cols) unless drop_cols.empty?
+
+      split_features_targets(df, split_ys, target)
+    end
+
+    def cleanup
+      @data.clear
+    end
+
+    def split_at
+      @data.keys.empty? ? nil : Time.now
+    end
+  end
+
   class DatasetService
     include GlueGun::DSL
 
@@ -148,6 +284,30 @@ module ModelTest
         option.bind_attribute :date_col, required: true
         option.bind_attribute :months_test, required: true
         option.bind_attribute :months_valid, required: true
+      end
+    end
+
+    dependency :raw, lazy: false do |dependency|
+      dependency.option :memory do |option|
+        option.set_class InMemorySplit
+      end
+
+      dependency.when do |_dep|
+        { option: :memory } if datasource.respond_to?(:df)
+      end
+    end
+
+    # Here we define the processed dataset (uses the Split class)
+    # After we learn the dataset statistics, we fill null values
+    # using the learned statistics (e.g. fill annual_revenue with median annual_revenue)
+    #
+    dependency :processed, lazy: false do |dependency|
+      dependency.option :memory do |option|
+        option.set_class InMemorySplit
+      end
+
+      dependency.when do |_dep|
+        { option: :memory } if datasource.respond_to?(:df)
       end
     end
   end
@@ -214,7 +374,7 @@ RSpec.describe GlueGun::Model do
   end
 
   describe "Models w/ dependencies" do
-    it "builds them properly" do
+    let(:df) do
       df = Polars::DataFrame.new({
                                    id: [1, 2, 3, 4, 5, 6, 7, 8],
                                    rev: [0, 0, 100, 200, 0, 300, 400, 500],
@@ -228,6 +388,9 @@ RSpec.describe GlueGun::Model do
       df.with_column(
         Polars.col("created_date").str.strptime(Polars::Datetime, "%Y-%m-%d").alias("created_date")
       )
+    end
+
+    it "builds them properly" do
       datasource = ModelTest::Datasource.create!(
         name: "My Polars Df",
         df: df
@@ -249,6 +412,42 @@ RSpec.describe GlueGun::Model do
       expect(dataset.splitter).to be_a ModelTest::DateSplitter
       expect(dataset.splitter.months_test).to eq 3
       expect(dataset.splitter.months_valid).to eq 2
+    end
+
+    it "works with foreign keys" do
+      datasource = ModelTest::Datasource.create!(
+        name: "My Polars Df",
+        df: df
+      )
+
+      df2 = Polars::DataFrame.new({ a: [1, 2, 3] })
+      datasource2 = ModelTest::Datasource.create!(
+        name: "My Polars Df",
+        df: df2
+      )
+
+      dataset = ModelTest::Dataset.create(
+        name: "My Dataset",
+        datasource_id: datasource.id,
+        splitter: {
+          date: {
+            months_test: 3
+          }
+        }
+      )
+
+      dataset = ModelTest::Dataset.find(dataset.id)
+
+      expect(dataset.datasource).to be_a ModelTest::Datasource
+      expect(dataset.datasource.id).to eq datasource.id
+
+      dataset.update(datasource_id: datasource2.id)
+
+      expect(dataset.datasource).to be_a ModelTest::Datasource
+      expect(dataset.datasource.id).to eq datasource2.id
+      expect(dataset.datasource.df).to eq df2
+      expect(dataset.raw).to be_a(ModelTest::InMemorySplit)
+      expect(dataset.processed).to be_a(ModelTest::InMemorySplit)
     end
   end
 end
