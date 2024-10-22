@@ -11,6 +11,9 @@ require "glue_gun"
 
 ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
 
+PROJECT_ROOT = Pathname.new(File.expand_path("..", __dir__))
+SPEC_ROOT = PROJECT_ROOT.join("spec")
+
 ActiveRecord::Schema.define do
   create_table :active_record_tests do |t|
     t.string :custom_field
@@ -28,6 +31,25 @@ ActiveRecord::Schema.define do
 
   create_table :uh_ohs do |t|
     t.timestamps
+  end
+
+  create_table :datasources do |t|
+    t.string :name, null: false
+    t.json :configuration
+
+    t.timestamps
+  end
+
+  create_table :datasets do |t|
+    t.string :name, null: false
+    t.bigint :datasource_id
+    t.json :configuration
+
+    t.timestamps
+
+    t.index :created_at
+    t.index :name
+    t.index :datasource_id
   end
 end
 
