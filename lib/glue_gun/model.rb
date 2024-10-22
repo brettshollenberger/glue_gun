@@ -12,7 +12,6 @@ module GlueGun
 
       # Set default service attribute name based on the class name
       self.service_attribute_name = "#{name.demodulize.underscore}_service".to_sym
-      # self.delegated_methods = []
     end
 
     class_methods do
@@ -25,17 +24,6 @@ module GlueGun
           raise ArgumentError, "You must provide a service class, factory, or a block to resolve the service class."
         end
       end
-
-      # def delegate_service_methods(*methods)
-      #   methods.each do |method_name|
-      #     delegated_methods << method_name.to_sym
-
-      #     define_method(method_name) do |*args, &block|
-      #       service_object = instance_variable_get("@#{service_attribute_name}")
-      #       service_object.send(method_name, *args, &block)
-      #     end
-      #   end
-      # end
     end
 
     def initialize(attributes = {})
@@ -61,7 +49,6 @@ module GlueGun
       service_attributes = extract_service_attributes(attributes, service_class)
       service_instance = service_class.new(service_attributes)
       instance_variable_set("@#{service_attribute_name}", service_instance)
-      # define_service_delegators(service_class)
     end
 
     def resolve_service_class(attributes)
@@ -140,7 +127,6 @@ module GlueGun
       serialized_data = service_class.deserialize(serialized_data) if service_class.respond_to?(:deserialize)
       service_instance = service_class.new(serialized_data)
       instance_variable_set("@#{service_attribute_name}", service_instance)
-      # define_service_delegators(service_class)
     end
 
     def allowed_names(names)

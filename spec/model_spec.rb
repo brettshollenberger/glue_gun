@@ -87,8 +87,7 @@ module ModelTest
       end
     end
 
-    # delegate_service_methods :data
-    delegate :data, to: :datasource_service
+    delegate :data, :df, to: :datasource_service
   end
 
   class DateSplitter
@@ -350,6 +349,25 @@ RSpec.describe GlueGun::Model do
 
         datasource = ModelTest::Datasource.find(datasource.id)
         expect(datasource.data).to eq df
+      end
+
+      it "delegates to service classes" do
+        datasource = ModelTest::Datasource.create!(
+          name: "My Polars Df",
+          df: df
+        )
+
+        expect(datasource).to_not receive(:method_missing)
+        expect(datasource.df).to eq df
+      end
+
+      it "reloads object" do
+        datasource = ModelTest::Datasource.create!(
+          name: "My Polars Df",
+          df: df
+        )
+        datasource.reload
+        expect(datasource.df).to eq df
       end
     end
 
