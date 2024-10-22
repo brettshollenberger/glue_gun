@@ -87,8 +87,27 @@ module GlueGun
 
     def serialize_service_object
       service_object = instance_variable_get("@#{service_attribute_name}")
-      serialized_data = service_object.serialize
-      write_attribute(:configuration, serialized_data.to_json)
+      attrs = service_object.respond_to?(:serialize) ? service_object.serialize : service_object.attributes
+      deps = allowed_names(service_object.dependency_definitions.keys).inject({}) do |hash, dep|
+        hash.tap do
+          this_dep = service_object.send(dep)
+          next unless this_dep.present?
+
+          opts = service_object.dependency_definitions[dep].option_configs
+          selected_option = opts.detect do |_k, v|
+            this_dep.class == v.class_name
+          end&.first
+          unless selected_option.present?
+            raise "Don't know how to serialize dependency of type #{dep}, available options are #{opts.keys}. You didn't specify an option."
+          end
+
+          hash[dep] = {
+            selected_option => service_object.send(dep).attributes
+          }
+        end
+      end
+      json = attrs.merge(deps.deep_compact).deep_symbolize_keys
+      write_attribute(:configuration, json.to_json)
     end
 
     def deserialize_service_object
@@ -100,6 +119,38 @@ module GlueGun
       service_instance = service_class.new(serialized_data)
       instance_variable_set("@#{service_attribute_name}", service_instance)
       # define_service_delegators(service_class)
+    end
+
+    def allowed_names(names)
+      assoc_names = self.class.reflect_on_all_associations.map(&:name)
+      [names.map(&:to_sym) - assoc_names.map(&:to_sym)].flatten
+    end
+
+    def serialize
+      dataset_service.attributes
+      write_attribute(:configuration, json.to_json)
+    end
+
+    def deserialize
+      options = JSON.parse(read_attribute(:configuration))
+      options.deep_symbolize_keys!
+
+      build_dataset_service(options)
+    end
+
+    def method_missing(method_name, *args, &block)
+      service_object = instance_variable_get("@#{service_attribute_name}")
+
+      if service_object && service_object.respond_to?(method_name)
+        service_object.send(method_name, *args, &block)
+      else
+        super
+      end
+    end
+
+    def respond_to_missing?(method_name, include_private = false)
+      service_object = instance_variable_get("@#{service_attribute_name}")
+      service_object && service_object.respond_to?(method_name) || super
     end
   end
 end
