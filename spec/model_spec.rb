@@ -388,6 +388,25 @@ RSpec.describe GlueGun::Model do
         expect(datasource.datasource_service.s3_bucket).to eq "bucket"
         expect(datasource.data).to eq(Polars.read_csv(path.join("file.csv")))
       end
+
+      describe "Querying" do
+        it "find_or_create_by" do
+          path = SPEC_ROOT.join("files")
+
+          s3_datasource = ModelTest::Datasource.find_or_create_by!(
+            name: "s3 Datasource",
+            root_dir: path.to_s,
+            s3_bucket: "bucket",
+            s3_prefix: "raw",
+            s3_access_key_id: "12345",
+            s3_secret_access_key: "12345"
+          )
+
+          expect(s3_datasource.name).to eq "s3 Datasource"
+          expect(s3_datasource.s3_bucket).to eq "bucket"
+          expect(s3_datasource.data).to eq(Polars.read_csv(path.join("file.csv")))
+        end
+      end
     end
   end
 

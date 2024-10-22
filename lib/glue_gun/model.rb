@@ -24,25 +24,49 @@ module GlueGun
           raise ArgumentError, "You must provide a service class, factory, or a block to resolve the service class."
         end
       end
+
+      def find_or_create_by!(attributes)
+        attributes = attributes.deep_symbolize_keys
+        db_attributes = extract_db_attributes(attributes)
+        attributes.except(*db_attributes.keys)
+
+        record = where(db_attributes).first_or_initialize(attributes)
+
+        record.save! if record.new_record?
+
+        record
+      end
+
+      def find_or_create_by(attributes)
+        attributes = attributes.deep_symbolize_keys
+        db_attributes = extract_db_attributes(attributes)
+        attributes.except(*db_attributes.keys)
+
+        record = where(db_attributes).first_or_initialize(attributes)
+
+        record.save if record.new_record?
+
+        record
+      end
+
+      def extract_db_attributes(attributes)
+        # Extract attributes that correspond to database columns or associations
+        column_names = self.column_names.map(&:to_sym)
+        association_names = reflect_on_all_associations.map(&:name)
+
+        attributes.slice(*(column_names + association_names))
+      end
     end
 
     def initialize(attributes = {})
       attributes = attributes.deep_symbolize_keys
-      db_attributes = extract_db_attributes(attributes)
+      db_attributes = self.class.extract_db_attributes(attributes)
       super(db_attributes)
       self.class.send(:attr_reader, service_attribute_name)
       build_service_object(attributes)
     end
 
     private
-
-    def extract_db_attributes(attributes)
-      # Extract attributes that correspond to database columns or associations
-      column_names = self.class.column_names.map(&:to_sym)
-      association_names = self.class.reflect_on_all_associations.map(&:name)
-
-      attributes.slice(*(column_names + association_names))
-    end
 
     def build_service_object(attributes)
       service_class = resolve_service_class(attributes)
@@ -116,16 +140,36 @@ module GlueGun
           }
         end
       end
-      json = attrs.merge(deps.deep_compact).deep_symbolize_keys
+      json = serializable!(attrs.merge(deps.deep_compact).deep_symbolize_keys)
       write_attribute(:configuration, json.to_json)
+    end
+
+    def serializable!(json)
+      regular_args = json.slice(*allowed_names(json.keys))
+      assoc_names = self.class.reflect_on_all_associations.map(&:name)
+      found_associations = assoc_names & json.keys
+      found_associations.each do |association|
+        regular_args[association] = true
+      end
+      regular_args
+    end
+
+    def deserialize_associations(json)
+      assoc_names = self.class.reflect_on_all_associations.map(&:name)
+      found_associations = assoc_names & json.keys
+      found_associations.each do |association|
+        json[association] = send(association)
+      end
+      json
     end
 
     def deserialize_service_object
       serialized_data = JSON.parse(read_attribute(:configuration) || "{}")
       serialized_data.deep_symbolize_keys!
       service_class = resolve_service_class(serialized_data)
+      serialized_data = deserialize_associations(serialized_data)
       serialized_data = service_class.deserialize(serialized_data) if service_class.respond_to?(:deserialize)
-      service_instance = service_class.new(serialized_data)
+      service_instance = build_service_object(serialized_data)
       instance_variable_set("@#{service_attribute_name}", service_instance)
     end
 
@@ -134,23 +178,11 @@ module GlueGun
       [names.map(&:to_sym) - assoc_names.map(&:to_sym)].flatten
     end
 
-    def serialize
-      dataset_service.attributes
-      write_attribute(:configuration, json.to_json)
-    end
-
-    def deserialize
-      options = JSON.parse(read_attribute(:configuration))
-      options.deep_symbolize_keys!
-
-      build_dataset_service(options)
-    end
-
-    def method_missing(method_name, *args, &block)
+    def method_missing(method_name, *args, **kwargs, &block)
       service_object = instance_variable_get("@#{service_attribute_name}")
 
       if service_object && service_object.respond_to?(method_name)
-        service_object.send(method_name, *args, &block)
+        service_object.send(method_name, *args, **kwargs, &block)
       else
         super
       end

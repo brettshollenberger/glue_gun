@@ -438,8 +438,13 @@ module GlueGun
       def determine_option_name(init_args, instance)
         option_name = nil
 
-        # Use when block if defined
-        if when_block
+        user_specified_option = init_args.is_a?(Hash) && init_args.keys.size == 1
+        user_specified_valid_option = user_specified_option && option_configs.key?(init_args.keys.first)
+
+        if user_specified_valid_option
+          option_name = init_args.keys.first
+          init_args = init_args[option_name] # Extract the inner value
+        elsif when_block.present?
           result = instance.instance_exec(init_args, &when_block)
           if result.is_a?(Hash) && result[:option]
             option_name = result[:option]
@@ -448,24 +453,6 @@ module GlueGun
           end
         end
 
-        # Detect option from user input
-        if option_name.nil? && (init_args.is_a?(Hash) && init_args.keys.size == 1)
-          if option_configs.key?(init_args.keys.first)
-            option_name = init_args.keys.first
-            init_args = init_args[option_name] # Extract the inner value
-          else
-            default_option = get_option(default_option_name)
-            unless default_option.only?
-              raise ArgumentError,
-                    "Unknown #{component_type} option: #{init_args.keys.first}."
-            end
-            unless default_option.attributes.keys.include?(init_args.keys.first)
-              raise ArgumentError, "#{default_option.class_name} does not respond to #{init_args.keys.first}"
-            end
-          end
-        end
-
-        # Use default option if none determined
         option_name ||= default_option_name
 
         [option_name, init_args]
