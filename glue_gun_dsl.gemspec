@@ -17,6 +17,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "activemodel", ">= 6", "< 8"
   spec.add_dependency "activerecord", ">= 6", "< 8"
   spec.add_dependency "activesupport", ">= 6", "< 8"
+  spec.add_dependency "awesome_print"
 
   # Optional: Add development dependencies
   spec.add_development_dependency "appraisal"

@@ -12,7 +12,7 @@ module GlueGun
                       value
                     end
 
-        result[key] = compacted unless compacted.blank?
+        result[key] = compacted unless compacted.is_a?(String) && compacted.blank?
       end
     end
   end

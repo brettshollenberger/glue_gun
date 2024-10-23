@@ -1,8 +1,11 @@
+require_relative "shared"
 module GlueGun
   module Model
     extend ActiveSupport::Concern
 
     included do
+      include GlueGun::Shared
+
       before_save :serialize_service_object
       after_find :deserialize_service_object
 
@@ -32,7 +35,12 @@ module GlueGun
 
         record = where(db_attributes).first_or_initialize(attributes)
 
-        record.save! if record.new_record?
+        if record.new_record?
+          record.save!
+        else
+          record.send(:build_service_object, attributes)
+        end
+        yield record if block_given?
 
         record
       end
@@ -44,7 +52,12 @@ module GlueGun
 
         record = where(db_attributes).first_or_initialize(attributes)
 
-        record.save if record.new_record?
+        if record.new_record?
+          record.save
+        else
+          record.send(:build_service_object, attributes)
+        end
+        yield record if block_given?
 
         record
       end
@@ -59,19 +72,29 @@ module GlueGun
     end
 
     def initialize(attributes = {})
+      attributes[:root_dir] = detect_root_dir
       attributes = attributes.deep_symbolize_keys
       db_attributes = self.class.extract_db_attributes(attributes)
       super(db_attributes)
-      self.class.send(:attr_reader, service_attribute_name)
       build_service_object(attributes)
     end
 
     private
 
     def build_service_object(attributes)
+      self.class.send(:attr_reader, service_attribute_name)
       service_class = resolve_service_class(attributes)
+      raise "Unable to find service class for #{self.class} given #{attributes}" unless service_class.present?
+
       service_attributes = extract_service_attributes(attributes, service_class)
-      service_instance = service_class.new(service_attributes)
+      begin
+        service_instance = service_class.new(service_attributes)
+      rescue StandardError => e
+        ap %(Error building service object #{service_class}:)
+        ap e.message
+        ap e.backtrace
+        raise e
+      end
       instance_variable_set("@#{service_attribute_name}", service_instance)
     end
 

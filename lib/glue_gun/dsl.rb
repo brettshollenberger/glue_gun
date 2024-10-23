@@ -1,8 +1,11 @@
+require_relative "shared"
 module GlueGun
   module DSL
     extend ActiveSupport::Concern
 
     included do
+      include GlueGun::Shared
+
       unless ancestors.include?(ActiveRecord::Base)
         include ActiveModel::Model
         include ActiveModel::Attributes
@@ -77,6 +80,8 @@ module GlueGun
     end
 
     module ClassMethods
+      extend GlueGun::Shared
+
       DEFAULT_TYPE = if ActiveModel.version >= Gem::Version.new("7")
                        nil
                      elsif ActiveModel.version >= Gem::Version.new("5")
@@ -156,18 +161,13 @@ module GlueGun
       end
 
       def detect_root_dir
-        base_path = Module.const_source_location(name)&.first || ""
+        base_path = Module.const_source_location(self.class.name)&.first || ""
         File.dirname(base_path)
       end
     end
 
     def initialized?
       @initialized == true
-    end
-
-    def detect_root_dir
-      base_path = Module.const_source_location(self.class.name)&.first || ""
-      File.dirname(base_path)
     end
 
     def initialize_dependencies(attributes)
