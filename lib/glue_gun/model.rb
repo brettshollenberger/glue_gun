@@ -15,6 +15,19 @@ module GlueGun
 
       # Set default service attribute name based on the class name
       self.service_attribute_name = "#{name.demodulize.underscore}_service".to_sym
+
+      def assign_attributes(attributes)
+        return if attributes.blank?
+
+        attributes = attributes.deep_symbolize_keys
+        db_attributes = self.class.extract_db_attributes(attributes)
+
+        # Assign database attributes
+        super(db_attributes)
+
+        assign_service_attributes(attributes)
+      end
+      alias_method :attributes=, :assign_attributes
     end
 
     class_methods do
@@ -35,11 +48,7 @@ module GlueGun
 
         record = where(db_attributes).first_or_initialize(attributes)
 
-        if record.new_record?
-          record.save!
-        else
-          record.send(:build_service_object, attributes)
-        end
+        record.save! if record.new_record?
         yield record if block_given?
 
         record
@@ -52,11 +61,7 @@ module GlueGun
 
         record = where(db_attributes).first_or_initialize(attributes)
 
-        if record.new_record?
-          record.save
-        else
-          record.send(:build_service_object, attributes)
-        end
+        record.save if record.new_record?
         yield record if block_given?
 
         record
@@ -77,6 +82,22 @@ module GlueGun
       db_attributes = self.class.extract_db_attributes(attributes)
       super(db_attributes)
       build_service_object(attributes)
+    end
+
+    def assign_service_attributes(attributes)
+      return if attributes.blank?
+
+      service_object = instance_variable_get("@#{service_attribute_name}")
+      return unless service_object.present?
+
+      extract_service_attributes(attributes, service_object.class).each do |attr_name, value|
+        unless service_object.respond_to?("#{attr_name}=")
+          raise NoMethodError, "Undefined attribute #{attr_name} for #{service_object.class.name}"
+        end
+
+        service_object.send("#{attr_name}=", value)
+        attribute_will_change!(attr_name.to_s)
+      end
     end
 
     private

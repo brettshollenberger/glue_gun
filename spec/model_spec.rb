@@ -286,7 +286,12 @@ module ModelTest
       end
     end
 
-    dependency :raw, lazy: false do |dependency|
+    dependency :raw do |dependency|
+      dependency.option :default do |option|
+        option.default
+        option.set_class Split
+      end
+
       dependency.option :memory do |option|
         option.set_class InMemorySplit
       end
@@ -300,7 +305,12 @@ module ModelTest
     # After we learn the dataset statistics, we fill null values
     # using the learned statistics (e.g. fill annual_revenue with median annual_revenue)
     #
-    dependency :processed, lazy: false do |dependency|
+    dependency :processed do |dependency|
+      dependency.option :default do |option|
+        option.default
+        option.set_class Split
+      end
+
       dependency.option :memory do |option|
         option.set_class InMemorySplit
       end
@@ -518,6 +528,58 @@ RSpec.describe GlueGun::Model do
       expect(dataset.datasource.df).to eq df2
       expect(dataset.raw).to be_a(ModelTest::InMemorySplit)
       expect(dataset.processed).to be_a(ModelTest::InMemorySplit)
+    end
+
+    it "assigns associations" do
+      SPEC_ROOT.join("files")
+
+      datasource = ModelTest::Datasource.create!(
+        name: "My Polars Df",
+        df: df
+      )
+
+      dataset = ModelTest::Dataset.find_or_create_by(name: "My Dataset") do |dataset|
+        dataset.assign_attributes(
+          datasource: datasource,
+          splitter: {
+            date: {
+              months_test: 3
+            }
+          }
+        )
+      end
+
+      expect(dataset.datasource).to eq datasource
+      expect(dataset.dataset_service.datasource).to eq datasource
+      expect(dataset.splitter).to be_a(ModelTest::DateSplitter)
+    end
+
+    it "updates associations" do
+      SPEC_ROOT.join("files")
+
+      datasource = ModelTest::Datasource.create!(
+        name: "My Polars Df",
+        df: df
+      )
+
+      dataset = ModelTest::Dataset.find_or_create_by(name: "My Dataset") do |dataset|
+        dataset.update(
+          datasource: datasource,
+          splitter: {
+            date: {
+              months_test: 3
+            }
+          }
+        )
+      end
+
+      expect(dataset.datasource).to eq datasource
+      expect(dataset.dataset_service.datasource).to eq datasource
+      expect(dataset.splitter).to be_a(ModelTest::DateSplitter)
+
+      dataset.reload
+      expect(dataset.dataset_service.datasource).to eq datasource
+      expect(dataset.splitter).to be_a(ModelTest::DateSplitter)
     end
   end
 end
