@@ -3,6 +3,40 @@ module GlueGun
   module Model
     extend ActiveSupport::Concern
 
+    class ServiceRegistry
+      attr_accessor :services
+
+      def register(k, v)
+        @services ||= {}
+        @services[k.to_sym] = v
+      end
+
+      def options
+        services.keys
+      end
+
+      def []=(k, v)
+        register(k, v)
+      end
+
+      def [](k)
+        return nil if k.nil?
+
+        @services ||= {}
+        @services.dig(k.to_sym)
+      end
+
+      def default_key
+        return unless services.keys.count == 1
+
+        services.keys.first
+      end
+
+      def default
+        default_key.present? ? services[default_key] : nil
+      end
+    end
+
     included do
       include GlueGun::Shared
 
@@ -15,6 +49,13 @@ module GlueGun
 
       # Set default service attribute name based on the class name
       self.service_attribute_name = "#{name.demodulize.underscore}_service".to_sym
+
+      class_attribute :service_registry
+      self.service_registry = ServiceRegistry.new
+
+      # Set default option key based on the class name
+      class_attribute :option_key
+      self.option_key = "#{name.demodulize.underscore}_type".to_sym
 
       def assign_attributes(attributes)
         return if attributes.blank?
@@ -31,14 +72,8 @@ module GlueGun
     end
 
     class_methods do
-      def service(class_or_proc = nil, &block)
-        if class_or_proc.is_a?(Class)
-          self.service_class = class_or_proc
-        elsif block_given?
-          self.service_class_resolver = block
-        else
-          raise ArgumentError, "You must provide a service class, factory, or a block to resolve the service class."
-        end
+      def service(key, service_class)
+        service_registry[key] = service_class
       end
 
       def find_or_create_by!(attributes)
@@ -77,8 +112,9 @@ module GlueGun
     end
 
     def initialize(attributes = {})
-      attributes[:root_dir] = detect_root_dir
+      attributes[:root_dir] ||= detect_root_dir
       attributes = attributes.deep_symbolize_keys
+      attributes[option_key] ||= resolve_service_type(attributes, true)
       db_attributes = self.class.extract_db_attributes(attributes)
       super(db_attributes)
       build_service_object(attributes)
@@ -119,14 +155,26 @@ module GlueGun
       instance_variable_set("@#{service_attribute_name}", service_instance)
     end
 
+    def resolve_service_type(attributes, initializing = false)
+      attrs = if initializing || !persisted? || attributes.key?(self.class.option_key)
+                attributes
+              else
+                { self.class.option_key => send(self.class.option_key) }
+              end
+      attrs[self.class.option_key] || self.class.service_registry.default_key
+    end
+
     def resolve_service_class(attributes)
-      if self.class.service_class
-        self.class.service_class
-      elsif self.class.service_class_resolver
-        self.class.service_class_resolver.call(attributes)
-      else
-        raise "Service class not defined for #{self.class.name}"
+      type = resolve_service_type(attributes)
+      service_class = self.class.service_registry[type] || self.class.service_registry.default
+
+      unless service_class
+        available_types = self.class.service_registry.options
+        raise ArgumentError,
+              "#{self.class} requires argument #{self.class.option_key}. Invalid option key received: #{type}. Allowed options are: #{available_types}"
       end
+
+      service_class
     end
 
     def extract_service_attributes(attributes, service_class)

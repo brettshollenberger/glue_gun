@@ -35,6 +35,7 @@ ActiveRecord::Schema.define do
 
   create_table :datasources do |t|
     t.string :name, null: false
+    t.string :datasource_type
     t.json :configuration
 
     t.timestamps
@@ -42,6 +43,7 @@ ActiveRecord::Schema.define do
 
   create_table :datasets do |t|
     t.string :name, null: false
+    t.string :dataset_type
     t.bigint :datasource_id
     t.json :configuration
 

@@ -79,13 +79,8 @@ module ModelTest
   class Datasource < ActiveRecord::Base
     include GlueGun::Model
 
-    service do |options|
-      if options.key?(:df)
-        PolarsDatasource
-      elsif options.key?(:s3_bucket)
-        S3Datasource
-      end
-    end
+    service :polars, PolarsDatasource
+    service :s3, S3Datasource
 
     delegate :data, :df, to: :datasource_service
   end
@@ -324,7 +319,7 @@ module ModelTest
   class Dataset < ActiveRecord::Base
     include GlueGun::Model
 
-    service DatasetService
+    service :dataset, DatasetService
     validates :name, presence: true
     belongs_to :datasource,
                foreign_key: :datasource_id
@@ -354,6 +349,7 @@ RSpec.describe GlueGun::Model do
         # Save the serialized DataFrame to the database
         datasource = ModelTest::Datasource.create!(
           name: "My Polars Df",
+          datasource_type: :polars,
           df: df
         )
 
@@ -364,6 +360,7 @@ RSpec.describe GlueGun::Model do
       it "delegates to service classes" do
         datasource = ModelTest::Datasource.create!(
           name: "My Polars Df",
+          datasource_type: :polars,
           df: df
         )
 
@@ -374,6 +371,7 @@ RSpec.describe GlueGun::Model do
       it "reloads object" do
         datasource = ModelTest::Datasource.create!(
           name: "My Polars Df",
+          datasource_type: :polars,
           df: df
         )
         datasource.reload
@@ -387,6 +385,7 @@ RSpec.describe GlueGun::Model do
 
         s3_datasource = ModelTest::Datasource.create!(
           name: "s3 Datasource",
+          datasource_type: :s3,
           root_dir: path,
           s3_bucket: "bucket",
           s3_prefix: "raw",
@@ -405,6 +404,7 @@ RSpec.describe GlueGun::Model do
 
           s3_datasource = ModelTest::Datasource.find_or_create_by!(
             name: "s3 Datasource",
+            datasource_type: :s3,
             root_dir: path.to_s,
             s3_bucket: "bucket",
             s3_prefix: "raw",
@@ -419,6 +419,7 @@ RSpec.describe GlueGun::Model do
           # This tests the find_by (when it's already created), still initializes the dependency
           s3_datasource = ModelTest::Datasource.find_or_create_by!(
             name: "s3 Datasource",
+            datasource_type: :s3,
             root_dir: path.to_s,
             s3_bucket: "bucket",
             s3_prefix: "raw",
@@ -433,10 +434,11 @@ RSpec.describe GlueGun::Model do
 
           s3_datasource = ModelTest::Datasource.find_or_create_by(
             name: "s3 Datasource",
-            s3_bucket: "bucket"
+            datasource_type: :s3
           ) do |datasource|
             datasource.assign_attributes(
               root_dir: path.to_s,
+              s3_bucket: "bucket",
               s3_prefix: "raw",
               s3_access_key_id: "12345",
               s3_secret_access_key: "12345"
@@ -473,6 +475,7 @@ RSpec.describe GlueGun::Model do
     it "builds them properly" do
       datasource = ModelTest::Datasource.create!(
         name: "My Polars Df",
+        datasource_type: :polars,
         df: df
       )
 
@@ -497,12 +500,14 @@ RSpec.describe GlueGun::Model do
     it "works with foreign keys" do
       datasource = ModelTest::Datasource.create!(
         name: "My Polars Df",
+        datasource_type: :polars,
         df: df
       )
 
       df2 = Polars::DataFrame.new({ a: [1, 2, 3] })
       datasource2 = ModelTest::Datasource.create!(
         name: "My Polars Df",
+        datasource_type: :polars,
         df: df2
       )
 
@@ -535,6 +540,7 @@ RSpec.describe GlueGun::Model do
 
       datasource = ModelTest::Datasource.create!(
         name: "My Polars Df",
+        datasource_type: :polars,
         df: df
       )
 
@@ -559,6 +565,7 @@ RSpec.describe GlueGun::Model do
 
       datasource = ModelTest::Datasource.create!(
         name: "My Polars Df",
+        datasource_type: :polars,
         df: df
       )
 
