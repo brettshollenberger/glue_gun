@@ -112,6 +112,7 @@ module GlueGun
     end
 
     def initialize(attributes = {})
+      attributes = {} if attributes.nil?
       attributes[:root_dir] ||= detect_root_dir
       attributes = attributes.deep_symbolize_keys
       attributes[option_key] ||= resolve_service_type(attributes, true)
