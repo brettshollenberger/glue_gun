@@ -159,8 +159,10 @@ module GlueGun
     def resolve_service_type(attributes, initializing = false)
       attrs = if initializing || !persisted? || attributes.key?(self.class.option_key)
                 attributes
-              else
+              elsif respond_to?(self.class.option_key)
                 { self.class.option_key => send(self.class.option_key) }
+              else
+                { self.class.option_key => self.class.service_registry.default_key }
               end
       attrs[self.class.option_key] || self.class.service_registry.default_key
     end
