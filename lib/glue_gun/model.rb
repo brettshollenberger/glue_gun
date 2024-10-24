@@ -211,6 +211,18 @@ module GlueGun
       end.symbolize_keys
     end
 
+    def serialize_object(object)
+      if object.respond_to?(:serialize)
+        object.serialize
+      elsif object.respond_to?(:attributes)
+        object.attributes.deep_compact
+      else
+        Hash[object.instance_variables.map do |var|
+          [var.to_s.delete("@"), object.instance_variable_get(var)]
+        end].deep_compact
+      end
+    end
+
     def serialize_dependency(dependency, dep_instance = nil)
       dep_instance = service_object.send(dependency) if dep_instance.nil?
       return nil unless dep_instance.present?
@@ -225,7 +237,7 @@ module GlueGun
         raise "Don't know how to serialize dependency of type #{dependency}, available options are #{opts.keys}. You didn't specify an option."
       end
 
-      serialized = dep_instance.respond_to?(:serialize) ? dep_instance.serialize : dep_instance.attributes.deep_compact
+      serialized = serialize_object(dep_instance)
       {
         selected_option => serialized
       }
@@ -240,7 +252,7 @@ module GlueGun
     end
 
     def serialize_service_object
-      attrs = service_object.respond_to?(:serialize) ? service_object.serialize : service_object.attributes.deep_compact
+      attrs = serialize_object(service_object)
       deps = allowed_names(service_object.dependency_definitions.keys).inject({}) do |hash, dep|
         hash.tap do
           serialized = serialize_dependency(dep)
