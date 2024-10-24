@@ -398,7 +398,7 @@ RSpec.describe GlueGun::DSL do
 
         expect do
           Example.new(dep: { invalid: true })
-        end.to raise_error(ArgumentError, /ExampleDep does not respond to invalid/)
+        end.to raise_error(ActiveModel::UnknownAttributeError, /unknown attribute 'invalid'/)
       end
     end
 

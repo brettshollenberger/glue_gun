@@ -11,9 +11,9 @@ module ModelTest
       df
     end
 
-    def self.serialize(datasource)
+    def serialize
       {
-        df: JSON.parse(datasource.df.write_json)
+        df: JSON.parse(df.write_json)
       }
     end
 
@@ -71,8 +71,8 @@ module ModelTest
       Polars.concat(dfs)
     end
 
-    def serialize
-      attributes
+    def self.serialize(instance)
+      instance.attributes
     end
   end
 
@@ -314,6 +314,18 @@ module ModelTest
         { option: :memory } if datasource.respond_to?(:df)
       end
     end
+
+    dependency :datasources, { array: true } do |dependency|
+      dependency.option :polars do |option|
+        option.set_class PolarsDatasource
+        option.bind_attribute :df
+      end
+
+      dependency.option :s3 do |option|
+        option.set_class S3Datasource
+        option.bind_attribute :s3_bucket
+      end
+    end
   end
 
   class Dataset < ActiveRecord::Base
@@ -328,32 +340,50 @@ end
 
 RSpec.describe GlueGun::Model do
   describe "Independent models" do
+    let(:df) do
+      df = Polars::DataFrame.new({
+                                   id: [1, 2, 3, 4, 5, 6, 7, 8],
+                                   rev: [0, 0, 100, 200, 0, 300, 400, 500],
+                                   annual_revenue: [300, 400, 5000, 10_000, 20_000, 30, nil, nil],
+                                   points: [1.0, 2.0, 0.1, 0.8, nil, 0.1, 0.4, 0.9],
+                                   created_date: %w[2021-01-01 2021-01-01 2022-02-02 2024-01-01 2024-06-15 2024-07-01
+                                                    2024-08-01 2024-09-01]
+                                 })
+
+      # Convert the 'created_date' column to datetime
+      df.with_column(
+        Polars.col("created_date").str.strptime(Polars::Datetime, "%Y-%m-%d").alias("created_date")
+      )
+    end
+
+    let(:path) do
+      SPEC_ROOT.join("files")
+    end
+
+    let(:s3_datasource) do
+      ModelTest::Datasource.create!(
+        name: "s3 Datasource",
+        datasource_type: :s3,
+        root_dir: path,
+        s3_bucket: "bucket",
+        s3_prefix: "raw",
+        s3_access_key_id: "12345",
+        s3_secret_access_key: "12345"
+      )
+    end
+
+    let(:polars_datasource) do
+      ModelTest::Datasource.create!(
+        name: "My Polars Df",
+        datasource_type: :polars,
+        df: df
+      )
+    end
+
     describe "Polars Datasource" do
-      let(:df) do
-        df = Polars::DataFrame.new({
-                                     id: [1, 2, 3, 4, 5, 6, 7, 8],
-                                     rev: [0, 0, 100, 200, 0, 300, 400, 500],
-                                     annual_revenue: [300, 400, 5000, 10_000, 20_000, 30, nil, nil],
-                                     points: [1.0, 2.0, 0.1, 0.8, nil, 0.1, 0.4, 0.9],
-                                     created_date: %w[2021-01-01 2021-01-01 2022-02-02 2024-01-01 2024-06-15 2024-07-01
-                                                      2024-08-01 2024-09-01]
-                                   })
-
-        # Convert the 'created_date' column to datetime
-        df.with_column(
-          Polars.col("created_date").str.strptime(Polars::Datetime, "%Y-%m-%d").alias("created_date")
-        )
-      end
-
       it "creates polars datasources" do
         # Save the serialized DataFrame to the database
-        datasource = ModelTest::Datasource.create!(
-          name: "My Polars Df",
-          datasource_type: :polars,
-          df: df
-        )
-
-        datasource = ModelTest::Datasource.find(datasource.id)
+        datasource = ModelTest::Datasource.find(polars_datasource.id)
         expect(datasource.data).to eq df
       end
 
@@ -381,18 +411,6 @@ RSpec.describe GlueGun::Model do
 
     describe "S3 Datasource" do
       it "saves and loads the s3 datasource" do
-        path = SPEC_ROOT.join("files")
-
-        s3_datasource = ModelTest::Datasource.create!(
-          name: "s3 Datasource",
-          datasource_type: :s3,
-          root_dir: path,
-          s3_bucket: "bucket",
-          s3_prefix: "raw",
-          s3_access_key_id: "12345",
-          s3_secret_access_key: "12345"
-        )
-
         datasource = ModelTest::Datasource.find(s3_datasource.id)
         expect(datasource.datasource_service.s3_bucket).to eq "bucket"
         expect(datasource.data).to eq(Polars.read_csv(path.join("file.csv")))
@@ -451,6 +469,21 @@ RSpec.describe GlueGun::Model do
           expect(s3_datasource.datasource_service.s3_prefix).to eq "raw"
           expect(s3_datasource.data).to eq(Polars.read_csv(path.join("file.csv")))
         end
+      end
+    end
+
+    describe "Array of dependencies" do
+      it "serializes / deserializes array of dependencies" do
+        dataset = ModelTest::Dataset.create(
+          name: "My Dataset",
+          datasources: [
+            s3_datasource.datasource_service,
+            polars_datasource.datasource_service
+          ]
+        )
+
+        reloaded = ModelTest::Dataset.find(dataset.id)
+        expect(reloaded.datasources.last.df).to eq polars_datasource.df
       end
     end
   end

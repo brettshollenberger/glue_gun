@@ -211,30 +211,45 @@ module GlueGun
       end.symbolize_keys
     end
 
+    def serialize_dependency(dependency, dep_instance = nil)
+      dep_instance = service_object.send(dependency) if dep_instance.nil?
+      return nil unless dep_instance.present?
+
+      return dep_instance.map { |dep| serialize_dependency(dependency, dep) } if dep_instance.is_a?(Array)
+
+      opts = service_object.dependency_definitions[dependency].option_configs
+      selected_option = opts.detect do |_k, v|
+        dep_instance.class == v.class_name
+      end&.first
+      unless selected_option.present?
+        raise "Don't know how to serialize dependency of type #{dependency}, available options are #{opts.keys}. You didn't specify an option."
+      end
+
+      serialized = dep_instance.respond_to?(:serialize) ? dep_instance.serialize : dep_instance.attributes.deep_compact
+      {
+        selected_option => serialized
+      }
+    end
+
+    def service_object
+      instance_variable_get("@#{service_attribute_name}")
+    end
+
+    def service_class
+      service_object.class
+    end
+
     def serialize_service_object
-      service_object = instance_variable_get("@#{service_attribute_name}")
-      service_klass = service_object.class
-      attrs = service_klass.respond_to?(:serialize) ? service_klass.serialize(service_object) : service_object.attributes
+      attrs = service_object.respond_to?(:serialize) ? service_object.serialize : service_object.attributes.deep_compact
       deps = allowed_names(service_object.dependency_definitions.keys).inject({}) do |hash, dep|
         hash.tap do
-          this_dep = service_object.send(dep)
-          next unless this_dep.present?
+          serialized = serialize_dependency(dep)
+          next if serialized.nil?
 
-          opts = service_object.dependency_definitions[dep].option_configs
-          selected_option = opts.detect do |_k, v|
-            this_dep.class == v.class_name
-          end&.first
-          unless selected_option.present?
-            raise "Don't know how to serialize dependency of type #{dep}, available options are #{opts.keys}. You didn't specify an option."
-          end
-
-          serialized = this_dep.respond_to?(:serialize) ? this_dep.serialize : this_dep.attributes
-          hash[dep] = {
-            selected_option => serialized
-          }
+          hash[dep] = serialized
         end
       end
-      json = serializable!(attrs.merge(deps.deep_compact).deep_symbolize_keys)
+      json = serializable!(attrs.merge(deps).deep_symbolize_keys)
       write_attribute(:configuration, json.to_json)
     end
 
@@ -257,12 +272,37 @@ module GlueGun
       json
     end
 
+    def deserialize_dependency(serialized, definition)
+      return serialized.map { |dep| deserialize_dependency(dep, definition) } if serialized.is_a?(Array)
+
+      dep_name = serialized.keys.first
+      selected_option = definition.option_configs[dep_name]
+      dependency_class = selected_option.class_name
+      arguments = serialized[dep_name]
+
+      dependency_class.respond_to?(:deserialize) ? dependency_class.deserialize(arguments) : arguments
+      {
+        dep_name => arguments
+      }
+    end
+
+    def deserialize_dependencies(serialized_data, service_class)
+      serialized_deps = (serialized_data.keys & allowed_names(service_class.dependency_definitions.keys))
+      serialized_deps.each do |name|
+        serialized = serialized_data[name]
+        definition = service_class.dependency_definitions[name]
+        serialized_data[name] = deserialize_dependency(serialized, definition)
+      end
+      serialized_data
+    end
+
     def deserialize_service_object
       serialized_data = JSON.parse(read_attribute(:configuration) || "{}")
       serialized_data.deep_symbolize_keys!
       service_class = resolve_service_class(serialized_data)
       serialized_data = deserialize_associations(serialized_data)
       serialized_data = service_class.deserialize(serialized_data) if service_class.respond_to?(:deserialize)
+      serialized_data = deserialize_dependencies(serialized_data, service_class)
       service_instance = build_service_object(serialized_data)
       instance_variable_set("@#{service_attribute_name}", service_instance)
     end
