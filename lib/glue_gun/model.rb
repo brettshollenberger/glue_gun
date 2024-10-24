@@ -227,8 +227,9 @@ module GlueGun
             raise "Don't know how to serialize dependency of type #{dep}, available options are #{opts.keys}. You didn't specify an option."
           end
 
+          serialized = this_dep.respond_to?(:serialize) ? this_dep.serialize : this_dep.attributes
           hash[dep] = {
-            selected_option => service_object.send(dep).attributes
+            selected_option => serialized
           }
         end
       end
