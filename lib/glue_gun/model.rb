@@ -139,6 +139,10 @@ module GlueGun
 
     private
 
+    def awesome_print(message)
+      ap message
+    end
+
     def build_service_object(attributes)
       self.class.send(:attr_reader, service_attribute_name)
       service_class = resolve_service_class(attributes)
@@ -148,9 +152,9 @@ module GlueGun
       begin
         service_instance = service_class.new(service_attributes)
       rescue StandardError => e
-        ap %(Error building service object #{service_class}:)
-        ap e.message
-        ap e.backtrace
+        awesome_print %(Error building service object #{service_class}:)
+        awesome_print e.message
+        awesome_print e.backtrace
         raise e
       end
       instance_variable_set("@#{service_attribute_name}", service_instance)
