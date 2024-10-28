@@ -267,7 +267,7 @@ module GlueGun
           hash[dep] = serialized
         end
       end
-      json = serializable!(attrs.merge(deps).deep_symbolize_keys)
+      json = serializable!(serialize_attrs(attrs.merge(deps).deep_symbolize_keys))
       write_attribute(:configuration, json.to_json)
     end
 
@@ -317,12 +317,56 @@ module GlueGun
     def deserialize_service_object
       serialized_data = JSON.parse(read_attribute(:configuration) || "{}")
       serialized_data.deep_symbolize_keys!
+      serialized_data = deserialize_attrs(serialized_data)
       service_class = resolve_service_class(serialized_data)
       serialized_data = deserialize_associations(serialized_data)
       serialized_data = service_class.deserialize(serialized_data) if service_class.respond_to?(:deserialize)
       serialized_data = deserialize_dependencies(serialized_data, service_class)
       service_instance = build_service_object(serialized_data)
       instance_variable_set("@#{service_attribute_name}", service_instance)
+    end
+
+    def serialize_attrs(attrs)
+      attrs.deep_transform_values do |value|
+        case value
+        when ActiveSupport::TimeWithZone
+          { "__type__" => "ActiveSupport::TimeWithZone", "value" => value.iso8601 }
+        else
+          value
+        end
+      end
+    end
+
+    def deserialize_attrs(attrs)
+      return nil if attrs.nil?
+
+      attrs.transform_values do |value|
+        recursive_deserialize(value)
+      end
+    end
+
+    def recursive_deserialize(value)
+      case value
+      when Hash
+        if value[:__type__]
+          deserialize_special_type(value)
+        else
+          value.transform_values { |v| recursive_deserialize(v) }
+        end
+      when Array
+        value.map { |v| recursive_deserialize(v) }
+      else
+        value
+      end
+    end
+
+    def deserialize_special_type(value)
+      case value[:__type__]
+      when "ActiveSupport::TimeWithZone"
+        Time.zone.parse(value[:value])
+      else
+        value[:value]
+      end
     end
 
     def allowed_names(names)

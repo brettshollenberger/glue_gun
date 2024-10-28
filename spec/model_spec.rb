@@ -6,6 +6,7 @@ module ModelTest
     include GlueGun::DSL
 
     attribute :df
+    attribute :today
 
     def data
       df
@@ -13,7 +14,8 @@ module ModelTest
 
     def serialize
       {
-        df: JSON.parse(df.write_json)
+        df: JSON.parse(df.write_json),
+        today: today
       }
     end
 
@@ -269,6 +271,7 @@ module ModelTest
       end)
     end
     attribute :datasource
+    attribute :today
 
     dependency :splitter do |dependency|
       dependency.option :date do |option|
@@ -484,6 +487,45 @@ RSpec.describe GlueGun::Model do
 
         reloaded = ModelTest::Dataset.find(dataset.id)
         expect(reloaded.datasources.last.df).to eq polars_datasource.df
+      end
+
+      it "serializes special types" do
+        Timecop.freeze
+
+        EST = ActiveSupport::TimeZone.new("America/New_York") unless defined?(EST)
+        dataset = ModelTest::Dataset.create(
+          name: "My Dataset",
+          today: EST.now
+        )
+
+        reloaded = ModelTest::Dataset.find(dataset.id)
+        expect(reloaded.today.class).to eq EST.now.class
+        expect(reloaded.today.to_i).to be_within(0.1).of(EST.now.to_i)
+
+        Timecop.return
+      end
+
+      it "serializes special types for associations" do
+        Timecop.freeze
+
+        EST = ActiveSupport::TimeZone.new("America/New_York") unless defined?(EST)
+        datasource = ModelTest::Datasource.create(
+          today: EST.now,
+          name: "My Datasource",
+          datasource_type: :polars,
+          df: Polars::DataFrame.new({ a: [1, 2, 3] })
+        )
+
+        dataset = ModelTest::Dataset.create(
+          name: "My Dataset",
+          datasource: datasource
+        )
+
+        reloaded = ModelTest::Dataset.find(dataset.id)
+        expect(reloaded.datasource.today.class).to eq EST.now.class
+        expect(reloaded.datasource.today.to_i).to be_within(0.1).of(EST.now.to_i)
+
+        Timecop.return
       end
     end
   end
