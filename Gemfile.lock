@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    glue_gun_dsl (0.1.29)
+    glue_gun_dsl (0.1.30)
       activemodel (>= 6, < 8)
       activerecord (>= 6, < 8)
       activesupport (>= 6, < 8)
