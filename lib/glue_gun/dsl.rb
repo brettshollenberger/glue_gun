@@ -395,7 +395,7 @@ module GlueGun
           option_name, init_args = determine_option_name(init_args, instance)
         end
 
-        option_config = option_configs[option_name]
+        option_config = option_configs[option_name.to_sym]
 
         raise ArgumentError, "Unknown #{component_type} option '#{option_name}'" unless option_config
 
@@ -490,7 +490,7 @@ module GlueGun
           next unless configuration.is_a?(Hash)
 
           key = configuration.keys.first
-          if key.nil? || allowed_configs.exclude?(key)
+          if key.nil? || allowed_configs.exclude?(key.to_sym)
             raise ArgumentError,
                   "Unknown #{component_type} option: #{init_args.keys.first}."
           end
