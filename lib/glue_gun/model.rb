@@ -114,8 +114,8 @@ module GlueGun
 
     def initialize(attributes = {})
       attributes = {} if attributes.nil?
+      attributes = attributes.to_h.deep_symbolize_keys
       attributes[:root_dir] ||= detect_root_dir
-      attributes = attributes.deep_symbolize_keys
       attributes[option_key] ||= resolve_service_type(attributes, true)
       db_attributes = self.class.extract_db_attributes(attributes)
       super(db_attributes)
