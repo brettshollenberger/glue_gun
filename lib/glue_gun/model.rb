@@ -198,7 +198,7 @@ module GlueGun
 
     def attrs_and_associations(attributes)
       foreign_keys = foreign_key_map
-      attributes.inject({}) do |h, (k, v)|
+      base_attrs = attributes.inject({}) do |h, (k, v)|
         h.tap do
           if foreign_keys.include?(k)
             assoc_name = foreign_keys[k]
@@ -206,6 +206,15 @@ module GlueGun
           else
             h[k] = v
           end
+        end
+      end
+      base_attrs.reverse_merge(associations)
+    end
+
+    def associations
+      self.class.reflect_on_all_associations.inject({}) do |h, assoc|
+        h.tap do
+          h[assoc.name] = send(assoc.name)
         end
       end
     end
