@@ -61,7 +61,7 @@ module GlueGun
       def assign_attributes(attributes)
         return if attributes.blank?
 
-        attributes = attributes.deep_symbolize_keys
+        attributes = attributes.to_h.deep_symbolize_keys
         db_attributes = self.class.extract_db_attributes(attributes)
 
         # Assign database attributes
@@ -78,7 +78,7 @@ module GlueGun
       end
 
       def find_or_create_by!(attributes)
-        attributes = attributes.deep_symbolize_keys
+        attributes = attributes.to_h.deep_symbolize_keys
         db_attributes = extract_db_attributes(attributes)
         attributes.except(*db_attributes.keys)
 
@@ -91,7 +91,7 @@ module GlueGun
       end
 
       def find_or_create_by(attributes)
-        attributes = attributes.deep_symbolize_keys
+        attributes = attributes.to_h.deep_symbolize_keys
         db_attributes = extract_db_attributes(attributes)
         attributes.except(*db_attributes.keys)
 
@@ -107,8 +107,9 @@ module GlueGun
         # Extract attributes that correspond to database columns or associations
         column_names = self.column_names.map(&:to_sym)
         association_names = reflect_on_all_associations.map(&:name)
+        nested_attributes = association_names.map { |name| "#{name}_attributes".to_sym }
 
-        attributes.slice(*(column_names + association_names))
+        attributes.slice(*(column_names + association_names + nested_attributes))
       end
     end
 
